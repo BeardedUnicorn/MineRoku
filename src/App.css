@@ -1,0 +1,21 @@
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background-color: #1a1a1a; /* Ensure full background coverage */
+}
+
+.app-container {
+  font-family: 'Arial', sans-serif;
+  text-align: center;
+  background-color: #1a1a1a; /* Dark background */
+  color: #ffffff;
+  min-height: 100vh;
+  padding: 20px;
+  box-sizing: border-box;
+}
+
+h1 {
+  color: #673AB7; /* Roku purple */
+  margin-bottom: 30px;
+}
