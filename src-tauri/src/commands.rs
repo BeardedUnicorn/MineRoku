@@ -5,6 +5,7 @@ use futures_util::stream::StreamExt;
 use std::time::Duration;
 use once_cell::sync::Lazy;
 use reqwest::Client;
+use xml::reader::{EventReader, XmlEvent as Event};
 
 /// Shared HTTP client for both discovery and commands
 static HTTP_CLIENT: Lazy<Client> = Lazy::new(|| Client::new());
@@ -15,6 +16,15 @@ pub struct RokuDevice {
     pub ip: String,
     pub port: u16,
     pub url: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct RokuApp {
+    pub id: String,
+    pub name: String,
+    pub app_type: String,
+    pub version: String,
+    pub icon_url: Option<String>,
 }
 
 /// Discover Roku devices via SSDP + manual device‐info fetch
@@ -88,6 +98,91 @@ pub async fn discover_roku_devices_impl() -> Result<Vec<RokuDevice>, String> {
     Ok(out)
 }
 
+/// List installed apps on a Roku device
+pub async fn list_roku_apps_impl(
+    ip: String,
+    port: u16,
+) -> Result<Vec<RokuApp>, String> {
+    let endpoint = format!("http://{}:{}/query/apps", ip, port);
+    eprintln!("→ Roku apps URL: {}", endpoint);
+
+    let resp = HTTP_CLIENT
+        .get(&endpoint)
+        .send()
+        .await
+        .map_err(|e| format!("Network error: {}", e))?;
+    
+    let status = resp.status();
+    let body = resp.text().await.unwrap_or_default();
+    eprintln!("← apps status: {}, body length: {}", status, body.len());
+
+    if !status.is_success() {
+        return Err(format!("Error {} from Roku: {}", status, body));
+    }
+
+    // Parse the XML response
+    let mut apps = Vec::new();
+    let mut current_app: Option<RokuApp> = None;
+    let mut current_text = String::new();
+
+    let reader = EventReader::from_str(&body);
+    
+    for event in reader {
+        match event {
+            Ok(Event::StartElement { name, attributes, .. }) => {
+                if name.local_name == "app" {
+                    let mut app = RokuApp {
+                        id: String::new(),
+                        name: String::new(),
+                        app_type: String::new(),
+                        version: String::new(),
+                        icon_url: None,
+                    };
+
+                    // Extract attributes
+                    for attr in attributes {
+                        match attr.name.local_name.as_str() {
+                            "id" => app.id = attr.value,
+                            "type" => app.app_type = attr.value,
+                            "version" => app.version = attr.value,
+                            _ => {}
+                        }
+                    }
+
+                    current_app = Some(app);
+                }
+                current_text.clear();
+            }
+            Ok(Event::Characters(text)) => {
+                current_text.push_str(&text);
+            }
+            Ok(Event::EndElement { name }) => {
+                if name.local_name == "app" {
+                    if let Some(mut app) = current_app.take() {
+                        app.name = current_text.trim().to_string();
+                        
+                        // Generate icon URL if available
+                        if !app.id.is_empty() {
+                            app.icon_url = Some(format!("http://{}:{}/query/icon/{}", ip, port, app.id));
+                        }
+                        
+                        apps.push(app);
+                    }
+                }
+                current_text.clear();
+            }
+            Ok(Event::EndDocument) => break,
+            Err(e) => {
+                eprintln!("⚠️ XML parsing error: {}", e);
+                break;
+            }
+            _ => {}
+        }
+    }
+
+    Ok(apps)
+}
+
 /// Send a single keypress to `/keypress/{KEY}`
 pub async fn send_roku_command_impl(
     ip: String,
@@ -142,7 +237,7 @@ pub async fn launch_roku_app_impl(
     eprintln!("→ Roku launch URL: {}", endpoint);
 
     let resp = HTTP_CLIENT
-        .get(&endpoint)
+        .post(&endpoint)
         .send()
         .await
         .map_err(|e| format!("Network error: {}", e))?;

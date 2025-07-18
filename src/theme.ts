@@ -1,14 +1,35 @@
-const theme = {
-  colors: {
-    primary: '#673AB7', // Roku purple
-    secondary: '#424242', // Dark gray
-    background: '#1a1a1a', // Very dark gray
-    text: '#ffffff', // White
-    lightGray: '#bbb',
-    mediumGray: '#555',
-    darkGray: '#222',
+import { createTheme } from '@mui/material/styles';
+
+const theme = createTheme({
+  palette: {
+    mode: 'dark',
+    primary: {
+      main: '#673AB7', // Roku purple
+    },
+    secondary: {
+      main: '#424242', // Dark gray
+    },
+    background: {
+      default: '#1a1a1a', // Very dark gray
+      paper: '#2a2a2a',
+    },
+    text: {
+      primary: '#ffffff', // White
+      secondary: '#bbb',
+    },
   },
-  // You can add more theme properties like typography, spacing, etc.
-};
+  typography: {
+    fontFamily: 'Arial, sans-serif',
+  },
+  components: {
+    MuiButton: {
+      styleOverrides: {
+        root: {
+          textTransform: 'none',
+        },
+      },
+    },
+  },
+});
 
 export default theme;
