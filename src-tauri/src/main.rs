@@ -1,14 +1,15 @@
-// src-tauri/src/main.rs
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use tauri::command;
 use roku_controller_lib::commands::{
     RokuDevice,
     RokuApp,
+    ActiveAppInfo, // Import new struct
     discover_roku_devices_impl,
     list_roku_apps_impl,
     send_roku_command_impl,
     launch_roku_app_impl,
+    get_active_app_impl, // Import new function
 };
 use tauri_plugin_opener::init as opener;
 
@@ -40,6 +41,13 @@ async fn launch_roku_app(
     launch_roku_app_impl(ip, port, app_id).await
 }
 
+// Define the new Tauri command
+#[command]
+async fn get_active_app(ip: String, port: u16) -> Result<ActiveAppInfo, String> {
+    get_active_app_impl(ip, port).await
+}
+
+
 fn main() {
     tauri::Builder::default()
         .plugin(opener())
@@ -47,7 +55,8 @@ fn main() {
             discover_roku_devices,
             list_roku_apps,
             send_roku_command,
-            launch_roku_app
+            launch_roku_app,
+            get_active_app // Register the new command
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

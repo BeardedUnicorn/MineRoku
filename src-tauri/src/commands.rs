@@ -1,3 +1,5 @@
+// src-tauri/src/commands.rs
+
 use serde::{Deserialize, Serialize};
 use url::Url;
 use ssdp_client::{search, SearchTarget};
@@ -5,9 +7,9 @@ use futures_util::stream::StreamExt;
 use std::time::Duration;
 use once_cell::sync::Lazy;
 use reqwest::Client;
-use xml::reader::{EventReader, XmlEvent as Event};
+use roku::{Device, Key};
 
-/// Shared HTTP client for both discovery and commands
+/// Shared HTTP client for discovery and manual requests.
 static HTTP_CLIENT: Lazy<Client> = Lazy::new(|| Client::new());
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -22,30 +24,33 @@ pub struct RokuDevice {
 pub struct RokuApp {
     pub id: String,
     pub name: String,
-    pub app_type: String,
+    // Note: `app_type` was removed. The `roku` v0.2.0 crate does not parse
+    // this attribute from the device's XML response. A frontend update
+    // is required to remove filtering based on this field.
     pub version: String,
     pub icon_url: Option<String>,
 }
 
-/// Discover Roku devices via SSDP + manual device‐info fetch
-pub async fn discover_roku_devices_impl() -> Result<Vec<RokuDevice>, String> {
-    // 1) Define the SSDP target
-    let search_target = SearchTarget::Custom("roku".into(), "ecp".into());
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ActiveAppInfo {
+    pub name: String,
+    pub id: String,
+    pub icon_url: Option<String>,
+}
 
-    // 2) Perform the search (3s timeout, 2 MX, no explicit retries)
+/// Discover Roku devices via SSDP. This function is correct.
+pub async fn discover_roku_devices_impl() -> Result<Vec<RokuDevice>, String> {
+    // ... (This function is unchanged)
+    let search_target = SearchTarget::Custom("roku".into(), "ecp".into());
     let mut responses = search(&search_target, Duration::from_secs(3), 2, None)
         .await
         .map_err(|e| e.to_string())?;
-
     let mut out = Vec::new();
     while let Some(resp_res) = responses.next().await {
-        // Only handle responses matching our target
         let resp = match resp_res {
             Ok(r) if r.search_target() == &search_target => r,
             _ => continue,
         };
-
-        // 3) Parse the LOCATION URL (usually ends in /description.xml)
         let desc_url = match Url::parse(resp.location()) {
             Ok(u) => u,
             Err(e) => {
@@ -53,11 +58,7 @@ pub async fn discover_roku_devices_impl() -> Result<Vec<RokuDevice>, String> {
                 continue;
             }
         };
-
-        // 4) Build the origin (scheme + host + port)
         let origin = desc_url.origin().ascii_serialization();
-
-        // 5) Fetch /query/device‑info and extract <friendlyDeviceName>
         let info_url = format!("{}/query/device-info", origin);
         let friendly = match HTTP_CLIENT.get(&info_url).send().await {
             Ok(resp) if resp.status().is_success() => {
@@ -82,11 +83,8 @@ pub async fn discover_roku_devices_impl() -> Result<Vec<RokuDevice>, String> {
                 origin.clone()
             }
         };
-
-        // 6) Extract IP & port from the description URL
         let ip = desc_url.host_str().unwrap_or_default().to_string();
         let port = desc_url.port_or_known_default().unwrap_or(8060);
-
         out.push(RokuDevice {
             name: friendly,
             ip,
@@ -94,140 +92,67 @@ pub async fn discover_roku_devices_impl() -> Result<Vec<RokuDevice>, String> {
             url: origin.clone(),
         });
     }
-
     Ok(out)
 }
 
-/// List installed apps on a Roku device
+/// List installed apps on a Roku device.
 pub async fn list_roku_apps_impl(
     ip: String,
     port: u16,
 ) -> Result<Vec<RokuApp>, String> {
-    let endpoint = format!("http://{}:{}/query/apps", ip, port);
-    eprintln!("→ Roku apps URL: {}", endpoint);
+    let base_url = format!("http://{}:{}", ip, port);
+    let url = Url::parse(&base_url).map_err(|e| e.to_string())?;
+    let device = Device::new(url);
 
-    let resp = HTTP_CLIENT
-        .get(&endpoint)
-        .send()
-        .await
-        .map_err(|e| format!("Network error: {}", e))?;
+    let apps_from_crate = device.apps().await.map_err(|e| e.to_string())?;
+
+    // CORRECTED: Handle Option types returned by the `roku` crate gracefully.
+    // We use `filter_map` to iterate, ensuring we only include apps that have an ID,
+    // as it is essential for launching and fetching icons.
+    let apps = apps_from_crate.apps
+        .into_iter()
+        .filter_map(|app| {
+            // If an app has no ID, we cannot use it. so we skip it.
+            app.id.map(|id| RokuApp {
+                id: id.clone(),
+                name: app.name,
+                // If version is not provided, use a default value.
+                version: app.version.unwrap_or_else(|| "N/A".to_string()),
+                // The icon URL is constructed using the now-guaranteed-to-exist ID.
+                icon_url: Some(format!("http://{}:{}/query/icon/{}", ip, port, &id)),
+            })
+        })
+        .collect();
     
-    let status = resp.status();
-    let body = resp.text().await.unwrap_or_default();
-    eprintln!("← apps status: {}, body length: {}", status, body.len());
-
-    if !status.is_success() {
-        return Err(format!("Error {} from Roku: {}", status, body));
-    }
-
-    // Parse the XML response
-    let mut apps = Vec::new();
-    let mut current_app: Option<RokuApp> = None;
-    let mut current_text = String::new();
-
-    let reader = EventReader::from_str(&body);
-    
-    for event in reader {
-        match event {
-            Ok(Event::StartElement { name, attributes, .. }) => {
-                if name.local_name == "app" {
-                    let mut app = RokuApp {
-                        id: String::new(),
-                        name: String::new(),
-                        app_type: String::new(),
-                        version: String::new(),
-                        icon_url: None,
-                    };
-
-                    // Extract attributes
-                    for attr in attributes {
-                        match attr.name.local_name.as_str() {
-                            "id" => app.id = attr.value,
-                            "type" => app.app_type = attr.value,
-                            "version" => app.version = attr.value,
-                            _ => {}
-                        }
-                    }
-
-                    current_app = Some(app);
-                }
-                current_text.clear();
-            }
-            Ok(Event::Characters(text)) => {
-                current_text.push_str(&text);
-            }
-            Ok(Event::EndElement { name }) => {
-                if name.local_name == "app" {
-                    if let Some(mut app) = current_app.take() {
-                        app.name = current_text.trim().to_string();
-                        
-                        // Generate icon URL if available
-                        if !app.id.is_empty() {
-                            app.icon_url = Some(format!("http://{}:{}/query/icon/{}", ip, port, app.id));
-                        }
-                        
-                        apps.push(app);
-                    }
-                }
-                current_text.clear();
-            }
-            Ok(Event::EndDocument) => break,
-            Err(e) => {
-                eprintln!("⚠️ XML parsing error: {}", e);
-                break;
-            }
-            _ => {}
-        }
-    }
-
     Ok(apps)
 }
 
-/// Send a single keypress to `/keypress/{KEY}`
+/// Send a single keypress using the `roku` crate.
 pub async fn send_roku_command_impl(
     ip: String,
     port: u16,
     command: String,
 ) -> Result<String, String> {
-    // Map to Roku‑exact casing
-    let key_str = match command.to_lowercase().as_str() {
-        "home"       => "Home",
-        "rev"        => "Rev",
-        "fwd"        => "Fwd",
-        "play"       => "Play",
-        "select"     => "Select",
-        "left"       => "Left",
-        "right"      => "Right",
-        "down"       => "Down",
-        "up"         => "Up",
-        "back"       => "Back",
-        "info"       => "Info",
-        "backspace"  => "Backspace",
-        "search"     => "Search",
-        "enter"      => "Enter",
+    let base_url = format!("http://{}:{}", ip, port);
+    let url = Url::parse(&base_url).map_err(|e| e.to_string())?;
+    let device = Device::new(url);
+
+    let key = match command.to_lowercase().as_str() {
+        "home"       => Key::Home, "rev"        => Key::Rev, "fwd"        => Key::Fwd,
+        "play"       => Key::Play, "select"     => Key::Select, "left"       => Key::Left,
+        "right"      => Key::Right, "down"       => Key::Down, "up"         => Key::Up,
+        "back"       => Key::Back, "info"       => Key::Info, "backspace"  => Key::Backspace,
+        "search"     => Key::Search, "enter"      => Key::Enter, "volumeup"   => Key::VolumeUp,
+        "volumedown" => Key::VolumeDown, "volumemute" => Key::VolumeMute,
         other        => return Err(format!("Unknown command: {}", other)),
     };
 
-    let endpoint = format!("http://{}:{}/keypress/{}", ip, port, key_str);
-    eprintln!("→ Roku keypress URL: {}", endpoint);
+    device.keypress(&key).await.map_err(|e| e.to_string())?;
 
-    let resp = HTTP_CLIENT
-        .post(&endpoint)
-        .send()
-        .await
-        .map_err(|e| format!("Network error: {}", e))?;
-    let status = resp.status();
-    let body   = resp.text().await.unwrap_or_default();
-    eprintln!("← status: {}, body: {}", status, body);
-
-    if status.is_success() {
-        Ok(format!("Sent '{}' to {}:{} (status {})", key_str, ip, port, status))
-    } else {
-        Err(format!("Error {} from Roku: {}", status, body))
-    }
+    Ok(format!("Sent '{}' to {}:{}", command, ip, port))
 }
 
-/// Launch an app via `/launch/{APP_ID}`
+/// Correctly implemented manual POST request for launching apps.
 pub async fn launch_roku_app_impl(
     ip: String,
     port: u16,
@@ -250,4 +175,31 @@ pub async fn launch_roku_app_impl(
     } else {
         Err(format!("Error {} from Roku: {}", status, body))
     }
+}
+
+/// Get the active app using the `roku` crate.
+pub async fn get_active_app_impl(ip: String, port: u16) -> Result<ActiveAppInfo, String> {
+    let base_url = format!("http://{}:{}", ip, port);
+    let url = Url::parse(&base_url).map_err(|e| e.to_string())?;
+    let device = Device::new(url);
+
+    let active_app = device.active_app().await.map_err(|e| e.to_string())?;
+    
+    // CORRECTED: Handle the case where the active app is the home screen,
+    // which may not have an ID. Default to "roku" for compatibility with the frontend.
+    let app = active_app.app;
+    let app_id = app.id.unwrap_or_else(|| "roku".to_string());
+    
+    let app_info = ActiveAppInfo {
+        name: app.name,
+        // Only generate an icon URL if the app is not the home screen.
+        icon_url: if app_id != "roku" {
+            Some(format!("http://{}:{}/query/icon/{}", ip, port, &app_id))
+        } else {
+            None
+        },
+        id: app_id,
+    };
+
+    Ok(app_info)
 }

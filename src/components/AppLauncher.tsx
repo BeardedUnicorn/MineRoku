@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { 
-    Box, 
-    Typography, 
+import {
+    Box,
+    Typography,
     Card,
     CardContent,
     CardMedia,
@@ -10,26 +10,26 @@ import {
     Button,
     Snackbar,
     Alert,
-    Chip,
-    GridLegacy as Grid
+    TextField,
+    InputAdornment,
+    Pagination,
+    Tooltip,
+    IconButton,
+    Divider
 } from '@mui/material';
 import {
     Refresh as RefreshIcon,
     Launch as LaunchIcon,
-    Apps as AppsIcon,
+    Search as SearchIcon,
+    Star as StarIcon,
+    StarBorder as StarBorderIcon,
 } from '@mui/icons-material';
+import { useAppStore, RokuDevice } from '../store';
 
-interface RokuDevice {
-    name: string;
-    ip: string;
-    port: number;
-    url: string;
-}
-
+// Updated interface: `app_type` has been removed to match the backend struct.
 interface RokuApp {
     id: string;
     name: string;
-    app_type: string;
     version: string;
     icon_url?: string;
 }
@@ -43,19 +43,29 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
     const [isLoading, setIsLoading] = useState(false);
     const [isLaunching, setIsLaunching] = useState<string | null>(null);
     const [feedback, setFeedback] = useState<{ message: string; severity: 'success' | 'error' } | null>(null);
+    const [searchTerm, setSearchTerm] = useState('');
+    const [currentPage, setCurrentPage] = useState(1);
+    const ITEMS_PER_PAGE = 4; // Increased items per page for a better grid view
+
+    const { favoriteApps, actions } = useAppStore((state) => ({
+        favoriteApps: state.favoriteApps[device.ip] || [],
+        actions: state.actions,
+    }));
 
     const fetchApps = async () => {
         setIsLoading(true);
+        setCurrentPage(1);
         try {
             const rokuApps: RokuApp[] = await invoke('list_roku_apps', {
                 ip: device.ip,
                 port: device.port,
             });
-            setApps(rokuApps);
-            setFeedback({ message: `Found ${rokuApps.length} apps`, severity: 'success' });
+            // Sort apps alphabetically by name
+            setApps(rokuApps.sort((a, b) => a.name.localeCompare(b.name)));
         } catch (error) {
             console.error('Error fetching apps:', error);
-            setFeedback({ message: `Error fetching apps: ${error}`, severity: 'error' });
+            const errorMessage = typeof error === 'string' ? error : 'An unknown error occurred.';
+            setFeedback({ message: `Error fetching apps: ${errorMessage}`, severity: 'error' });
         } finally {
             setIsLoading(false);
         }
@@ -64,176 +74,187 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
     const launchApp = async (appId: string, appName: string) => {
         setIsLaunching(appId);
         try {
-            const response = await invoke('launch_roku_app', {
+            await invoke('launch_roku_app', {
                 ip: device.ip,
                 port: device.port,
                 appId: appId,
             });
-            console.log(`App launched: ${appName}, Response: ${response}`);
-            setFeedback({ message: `Launched "${appName}" successfully`, severity: 'success' });
+            setFeedback({ message: `Launched "${appName}"`, severity: 'success' });
         } catch (error) {
             console.error(`Error launching app:`, error);
-            setFeedback({ message: `Error launching "${appName}": ${error}`, severity: 'error' });
+            const errorMessage = typeof error === 'string' ? error : 'An unknown error occurred.';
+            setFeedback({ message: `Error launching "${appName}": ${errorMessage}`, severity: 'error' });
         } finally {
             setIsLaunching(null);
         }
     };
-
-    const handleCloseFeedback = () => {
-        setFeedback(null);
-    };
+    
+    // Reset page number when search term changes
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [searchTerm]);
 
     useEffect(() => {
-        fetchApps();
+        if (device) {
+            fetchApps();
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [device]);
 
-    const getAppTypeColor = (type: string) => {
-        switch (type.toLowerCase()) {
-            case 'appl':
-                return 'primary';
-            case 'menu':
-                return 'secondary';
-            default:
-                return 'default';
-        }
+    // Filtering is now based only on the search term
+    const filteredApps = apps.filter(app =>
+        app.name.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+
+    const pageCount = Math.ceil(filteredApps.length / ITEMS_PER_PAGE);
+    const paginatedApps = filteredApps.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
+    const handlePageChange = (_event: React.ChangeEvent<unknown>, value: number) => {
+        setCurrentPage(value);
     };
 
+    const favoriteAppDetails = favoriteApps
+        .map(favId => apps.find(app => app.id === favId))
+        .filter((app): app is RokuApp => !!app); // Type guard to filter out undefined
+
     return (
-        <Box sx={{ p: 2 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
-                <Typography variant="h6">
-                    Apps on {device.name}
-                </Typography>
-                <Button
-                    variant="outlined"
-                    size="small"
-                    onClick={fetchApps}
-                    disabled={isLoading}
-                    startIcon={isLoading ? <CircularProgress size={16} /> : <RefreshIcon />}
-                >
-                    {isLoading ? 'Loading...' : 'Refresh'}
-                </Button>
+        <Box sx={{ mt: 4 }}>
+            {favoriteAppDetails.length > 0 && (
+                <>
+                    <Typography variant="h6" sx={{ mb: 2 }}>Favorite Apps</Typography>
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 4 }}>
+                        {favoriteAppDetails.map((app) => (
+                            <Box key={`fav-${app.id}`}>
+                                <Tooltip title={`Launch ${app.name}`}>
+                                    <Card 
+                                        onClick={() => launchApp(app.id, app.name)}
+                                        sx={{ 
+                                            p: 1, 
+                                            cursor: 'pointer', 
+                                            transition: 'transform 0.2s, box-shadow 0.2s',
+                                            '&:hover': {
+                                                transform: 'scale(1.05)',
+                                                boxShadow: 3
+                                            }
+                                        }}
+                                    >
+                                        <CardMedia
+                                            sx={{ height: 64, width: 64, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                                        >
+                                            {app.icon_url && <img src={app.icon_url} alt={app.name} style={{ maxHeight: '100%', maxWidth: '100%' }} />}
+                                        </CardMedia>
+                                    </Card>
+                                </Tooltip>
+                            </Box>
+                        ))}
+                    </Box>
+                    <Divider sx={{ mb: 4 }} />
+                </>
+            )}
+
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3, flexWrap: 'wrap', gap: 2 }}>
+                <Typography variant="h6">All Applications ({filteredApps.length})</Typography>
+                <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+                    <TextField
+                        label="Search Apps"
+                        variant="outlined"
+                        size="small"
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        sx={{ minWidth: '250px' }}
+                        InputProps={{
+                            startAdornment: (
+                                <InputAdornment position="start">
+                                    <SearchIcon />
+                                </InputAdornment>
+                            ),
+                        }}
+                    />
+                    <Button variant="outlined" size="medium" onClick={fetchApps} disabled={isLoading} startIcon={<RefreshIcon />}>
+                        Refresh
+                    </Button>
+                </Box>
             </Box>
 
             {isLoading ? (
-                <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 200 }}>
-                    <CircularProgress />
-                </Box>
-            ) : apps.length > 0 ? (
-                <Grid container spacing={2}>
-                    {apps.map((app) => (
-                        <Grid xs={12} sm={6} md={4} key={app.id}>
-                            <Card 
-                                sx={{ 
-                                    height: '100%',
-                                    display: 'flex',
-                                    flexDirection: 'column',
-                                    backgroundColor: 'background.paper',
-                                    transition: 'transform 0.2s',
-                                    '&:hover': {
-                                        transform: 'translateY(-2px)',
-                                        boxShadow: 3,
-                                    }
-                                }}
-                            >
+                <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}><CircularProgress /></Box>
+            ) : filteredApps.length > 0 ? (
+                <>
+                    <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 2 }}>
+                        {paginatedApps.map((app) => (
+                             <Card key={app.id} sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
                                 <CardMedia
-                                    sx={{ 
-                                        height: 80,
-                                        backgroundColor: 'action.hover',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'center'
-                                    }}
+                                    sx={{ height: 120, p: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'action.hover' }}
                                 >
-                                    {app.icon_url ? (
+                                    {app.icon_url && 
                                         <img
                                             src={app.icon_url}
                                             alt={app.name}
-                                            style={{
-                                                maxWidth: '100%',
-                                                maxHeight: '100%',
-                                                objectFit: 'contain'
-                                            }}
-                                            onError={(e) => {
-                                                // Fallback to icon if image fails to load
-                                                e.currentTarget.style.display = 'none';
-                                                e.currentTarget.parentElement!.innerHTML = '<svg width="40" height="40" viewBox="0 0 24 24" fill="currentColor"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-8 12.5v-9l6 4.5-6 4.5z"/></svg>';
-                                            }}
+                                            style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain' }}
+                                            loading="lazy"
                                         />
-                                    ) : (
-                                        <AppsIcon sx={{ fontSize: 40, color: 'text.secondary' }} />
-                                    )}
+                                    }
                                 </CardMedia>
                                 
                                 <CardContent sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
-                                    <Typography variant="h6" component="h3" sx={{ 
-                                        fontSize: '1rem', 
-                                        fontWeight: 'bold', 
-                                        mb: 1,
-                                        overflow: 'hidden',
-                                        textOverflow: 'ellipsis',
-                                        whiteSpace: 'nowrap'
-                                    }}>
-                                        {app.name}
-                                    </Typography>
-                                    
-                                    <Box sx={{ mb: 1, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                                        <Chip 
-                                            label={app.app_type}
-                                            size="small"
-                                            color={getAppTypeColor(app.app_type)}
-                                            variant="outlined"
-                                        />
-                                        {app.version && (
-                                            <Chip 
-                                                label={`v${app.version}`}
-                                                size="small"
-                                                variant="outlined"
-                                            />
-                                        )}
-                                    </Box>
-                                    
-                                    <Box sx={{ mt: 'auto', pt: 2 }}>
+                                    <Tooltip title={app.name}>
+                                        <Typography variant="h6" sx={{ fontSize: '1rem', fontWeight: 'bold', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                            {app.name}
+                                        </Typography>
+                                    </Tooltip>
+                                    <Typography variant="caption" color="text.secondary">ID: {app.id}</Typography>
+                                    <Box sx={{ mt: 'auto', pt: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
                                         <Button
                                             fullWidth
                                             variant="contained"
-                                            color="primary"
                                             onClick={() => launchApp(app.id, app.name)}
                                             disabled={isLaunching === app.id}
-                                            startIcon={
-                                                isLaunching === app.id ? 
-                                                    <CircularProgress size={16} /> : 
-                                                    <LaunchIcon />
-                                            }
+                                            startIcon={isLaunching === app.id ? <CircularProgress color="inherit" size={16} /> : <LaunchIcon />}
                                         >
                                             {isLaunching === app.id ? 'Launching...' : 'Launch'}
                                         </Button>
+                                        <Tooltip title={favoriteApps.includes(app.id) ? "Remove from favorites" : "Add to favorites"}>
+                                            <IconButton onClick={() => actions.toggleFavoriteApp(device.ip, app.id)}>
+                                                {favoriteApps.includes(app.id) ? <StarIcon color="primary" /> : <StarBorderIcon />}
+                                            </IconButton>
+                                        </Tooltip>
                                     </Box>
                                 </CardContent>
                             </Card>
-                        </Grid>
-                    ))}
-                </Grid>
+                        ))}
+                    </Box>
+                    {pageCount > 1 && (
+                        <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4, mb: 2 }}>
+                            <Pagination
+                                count={pageCount}
+                                page={currentPage}
+                                onChange={handlePageChange}
+                                color="primary"
+                            />
+                        </Box>
+                    )}
+                </>
             ) : (
-                <Box sx={{ textAlign: 'center', mt: 4 }}>
-                    <AppsIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
-                    <Typography variant="h6" color="text.secondary">
-                        No apps found
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                        Make sure your Roku device is properly connected and try refreshing.
+                <Box sx={{ textAlign: 'center', p: 4, mt: 4, border: '1px dashed', borderColor: 'divider', borderRadius: 2 }}>
+                    <SearchIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
+                    <Typography variant="h6" color="text.secondary">No matching apps found</Typography>
+                    <Typography variant="body1" color="text.secondary" sx={{ mt: 1 }}>
+                        Try clearing your search or refreshing the list.
                     </Typography>
                 </Box>
             )}
 
-            {/* Feedback Snackbar */}
-            <Snackbar
-                open={!!feedback}
-                autoHideDuration={4000}
-                onClose={handleCloseFeedback}
+            <Snackbar 
+                open={!!feedback} 
+                autoHideDuration={4000} 
+                onClose={() => setFeedback(null)} 
                 anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
             >
-                <Alert onClose={handleCloseFeedback} severity={feedback?.severity} sx={{ width: '100%' }}>
+                <Alert 
+                    onClose={() => setFeedback(null)} 
+                    severity={feedback?.severity} 
+                    sx={{ width: '100%' }}
+                    variant="filled"
+                >
                     {feedback?.message}
                 </Alert>
             </Snackbar>
