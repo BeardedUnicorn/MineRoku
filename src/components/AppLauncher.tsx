@@ -117,7 +117,7 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
         .filter((app): app is RokuApp => !!app); // Type guard to filter out undefined
 
     return (
-        <Box sx={{ mt: 4 }}>
+        <Box>
             {favoriteAppDetails.length > 0 && (
                 <>
                     <Typography variant="h6" sx={{ mb: 2 }}>Favorite Apps</Typography>
@@ -179,7 +179,7 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
                 <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}><CircularProgress /></Box>
             ) : filteredApps.length > 0 ? (
                 <>
-                    <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 2 }}>
+                    <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 2 }}>
                         {paginatedApps.map((app) => (
                              <Card key={app.id} sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
                                 <CardMedia
