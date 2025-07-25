@@ -34,3 +34,4 @@ logs/
 *.backup
 *.swp
 *.swo
+/src-tauri/gen/android/app/keystore.p12

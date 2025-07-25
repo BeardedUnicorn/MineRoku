@@ -1,194 +1,146 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { 
-    Box, 
-    Typography, 
-    CircularProgress, 
-    List, 
-    ListItem, 
-    ListItemButton, 
-    ListItemIcon, 
-    ListItemText,
-    IconButton,
-    Tooltip,
-    Divider,
-    Badge
+import { useAppStore, RokuDevice } from '../store';
+import {
+    Drawer, List, ListItemButton, ListItemText,
+    Typography, Box, IconButton, Divider, CircularProgress, Tooltip, useTheme, useMediaQuery
 } from '@mui/material';
-import { 
+import {
     Refresh as RefreshIcon,
-    DesktopWindows as DeviceIcon,
-    ChevronLeft as ChevronLeftIcon,
-    ChevronRight as ChevronRightIcon
+    Settings as SettingsIcon,
+    Info as InfoIcon,
+    Add as AddIcon
 } from '@mui/icons-material';
-import { motion } from 'framer-motion';
-import { useAppStore, RokuDevice, ConnectionStatus } from '../store';
-import logo from '../assets/logo.png';
 
 interface SidebarProps {
     isOpen: boolean;
     onToggle: () => void;
-    onDeviceSelect: (device: RokuDevice | null) => void;
     setIsSearching: (isSearching: boolean) => void;
-    setDevicesFound: (found: boolean) => void;
+    setDevicesFound: (devicesFound: boolean) => void;
 }
 
-const getBadgeColor = (status: ConnectionStatus) => {
-    switch (status) {
-        case 'connected': return 'success';
-        case 'connecting': return 'warning';
-        case 'disconnected': return 'error';
-        default: return 'default';
-    }
-};
+const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, setIsSearching, setDevicesFound }) => {
+    const { devices, selectedDevice, setDevices, setSelectedDevice } = useAppStore();
+    const [isScanning, setIsScanning] = useState(false);
+    const theme = useTheme();
+    const isMobile = useMediaQuery(theme.breakpoints.down('md'));
 
-const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, onDeviceSelect, setIsSearching, setDevicesFound }) => {
-    const devices = useAppStore((state) => state.devices);
-    const { addDiscoveredDevices, setDevices } = useAppStore((state) => state.actions);
-    const [selectedIp, setSelectedIp] = useState<string | null>(null);
-    const [loading, setLoading] = useState(true);
-
-    const fetchDevices = useCallback(async () => {
-        setLoading(true);
-        setIsSearching(true);
-        
-        const connectingDevices = devices.map(d => ({ ...d, status: 'connecting' as ConnectionStatus }));
-        setDevices(connectingDevices);
-
-        try {
-            const discoveredDevices: RokuDevice[] = await invoke('discover_roku_devices');
-            addDiscoveredDevices(discoveredDevices);
-            setDevicesFound(discoveredDevices.length > 0 || devices.length > 0);
-
-            if (discoveredDevices.length > 0 && !selectedIp) {
-                const newDevice = discoveredDevices[0];
-                setSelectedIp(newDevice.ip);
-                onDeviceSelect(newDevice);
-            }
-        } catch (error) {
-            console.error('Error discovering devices:', error);
-            const disconnectedDevices = devices.map(d => ({ ...d, status: 'disconnected' as ConnectionStatus }));
-            setDevices(disconnectedDevices);
-            setDevicesFound(false);
-        } finally {
-            setLoading(false);
-            setIsSearching(false);
-        }
-    }, [addDiscoveredDevices, setDevices, setIsSearching, setDevicesFound, onDeviceSelect, selectedIp, devices]);
-
-    useEffect(() => {
-        const timer = setTimeout(() => {
-            fetchDevices();
-        }, 1000);
-        return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
-
-    const handleDeviceClick = (device: RokuDevice) => {
-        if (device.status !== 'disconnected') {
-            setSelectedIp(device.ip);
-            onDeviceSelect(device);
+    const handleDeviceSelect = (device: RokuDevice) => {
+        setSelectedDevice(device);
+        if (isMobile) {
+            onToggle(); // Close sidebar on selection in mobile view
         }
     };
 
+    const scanForDevices = useCallback(async () => {
+        setIsScanning(true);
+        setIsSearching(true);
+        try {
+            const foundDevices: RokuDevice[] = await invoke('discover_roku_devices');
+            setDevices(foundDevices);
+            const anyDevicesFound = foundDevices.length > 0;
+            setDevicesFound(anyDevicesFound);
+            if (anyDevicesFound && !selectedDevice) {
+                // Automatically select the first device if none is selected
+                setSelectedDevice(foundDevices[0]);
+            } else if (!anyDevicesFound) {
+                // If no devices are found, clear the selection
+                setSelectedDevice(null);
+            }
+        } catch (err) {
+            console.error("Discovery error:", err);
+            setDevicesFound(false);
+            setSelectedDevice(null);
+        } finally {
+            setIsScanning(false);
+            setIsSearching(false);
+        }
+    }, [setDevices, setSelectedDevice, selectedDevice, setIsSearching, setDevicesFound]);
+
+    useEffect(() => {
+        scanForDevices();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []); // Run only once on initial mount
+
+    const openPopupWindow = () => {
+        invoke('open_popup_window');
+    };
+
+    const drawerWidth = 280;
+
     return (
-        <Box
-            component={motion.div}
-            animate={{ width: isOpen ? 280 : 80 }}
-            transition={{ duration: 0.3, ease: "easeInOut" }}
+        <Drawer
+            variant={isMobile ? 'temporary' : 'permanent'}
+            open={isOpen}
+            onClose={onToggle}
+            ModalProps={{ keepMounted: true }} // Better for mobile performance
             sx={{
+                width: drawerWidth,
                 flexShrink: 0,
-                bgcolor: 'background.paper',
-                height: '100vh',
-                display: 'flex',
-                flexDirection: 'column',
-                borderRight: '1px solid',
-                borderColor: 'divider',
-                overflow: 'hidden'
+                [`& .MuiDrawer-paper`]: {
+                    width: drawerWidth,
+                    boxSizing: 'border-box',
+                    backgroundColor: 'background.paper',
+                    borderRight: { xs: 'none', md: `1px solid ${theme.palette.divider}` },
+                },
             }}
         >
-            {/* Centered Logo and Header Section */}
-            <Box sx={{ flexShrink: 0, pt: 2 }}>
-                <Box sx={{ display: 'flex', justifyContent: 'center', mb: 1 }}>
-                    <Box
-                        component="img"
-                        src={logo}
-                        alt="App Logo"
-                        sx={{ height: 40, width: 'auto' }}
-                    />
-                </Box>
-                <motion.div
-                    animate={{ opacity: isOpen ? 1 : 0, height: isOpen ? 'auto' : 0 }}
-                    transition={{ duration: 0.2 }}
-                    style={{ overflow: 'hidden' }}
-                >
-                    <Box sx={{ 
-                        display: 'flex', 
-                        alignItems: 'center', 
-                        justifyContent: 'space-between', 
-                        px: 2, 
-                        pb: 1 
-                    }}>
-                        <Typography variant="h6" component="h2" noWrap>
-                            Roku Devices
-                        </Typography>
-                        <Tooltip title="Refresh Devices">
-                            <span>
-                                <IconButton onClick={fetchDevices} disabled={loading}>
-                                    {loading ? <CircularProgress size={24} /> : <RefreshIcon />}
-                                </IconButton>
-                            </span>
-                        </Tooltip>
-                    </Box>
-                </motion.div>
+            <Box sx={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                p: 1,
+                backgroundColor: 'background.default',
+                height: '64px' // Match AppBar height
+            }}>
+                <Typography variant="h6" sx={{ ml: 1, color: 'text.primary' }}>Roku Devices</Typography>
             </Box>
-
             <Divider />
-            
-            {/* Device List */}
-            <List sx={{ overflowY: 'auto', flexGrow: 1, overflowX: 'hidden' }}>
-                {devices.map((device) => (
-                    <ListItem key={device.ip} disablePadding>
-                        <ListItemButton
-                            selected={selectedIp === device.ip}
-                            onClick={() => handleDeviceClick(device)}
-                            disabled={device.status === 'disconnected'}
-                            sx={{ justifyContent: isOpen ? 'initial' : 'center', px: 3 }}
-                        >
-                            <Tooltip title={!isOpen ? `${device.name} (${device.status})` : ''} placement="right">
-                                <ListItemIcon sx={{ minWidth: 0, justifyContent: 'center' }}>
-                                    <Badge
-                                        variant="dot"
-                                        color={getBadgeColor(device.status)}
-                                        overlap="circular"
-                                        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-                                    >
-                                        <DeviceIcon />
-                                    </Badge>
-                                </ListItemIcon>
-                            </Tooltip>
-                            {isOpen && <ListItemText primary={device.name} secondary={device.ip} sx={{ pl: 2 }} />}
-                        </ListItemButton>
-                    </ListItem>
-                ))}
-            </List>
-            
+            <Box sx={{ flexGrow: 1, overflowY: 'auto' }}>
+                <List>
+                    {isScanning ? (
+                        <Box sx={{ display: 'flex', justifyContent: 'center', p: 2 }}><CircularProgress /></Box>
+                    ) : (
+                        devices.map((device: RokuDevice) => (
+                            <ListItemButton
+                                key={device.ip}
+                                selected={selectedDevice?.ip === device.ip}
+                                onClick={() => handleDeviceSelect(device)}
+                            >
+                                <ListItemText primary={device.name} secondary={device.ip} />
+                            </ListItemButton>
+                        ))
+                    )}
+                </List>
+            </Box>
             <Divider />
-            
-            {/* Sidebar Toggle Button */}
-            <Box
-                sx={{
-                    py: 1,
-                    display: 'flex',
-                    justifyContent: isOpen ? 'flex-end' : 'center',
-                }}
-            >
-                <Tooltip title={isOpen ? "Collapse Sidebar" : "Expand Sidebar"} placement="right">
-                    <IconButton onClick={onToggle}>
-                        {isOpen ? <ChevronLeftIcon /> : <ChevronRightIcon />}
+            <Box sx={{ p: 1, display: 'flex', justifyContent: 'space-around' }}>
+                <Tooltip title="Refresh Device List">
+                    <span>
+                        <IconButton onClick={scanForDevices} disabled={isScanning}>
+                            <RefreshIcon />
+                        </IconButton>
+                    </span>
+                </Tooltip>
+                <Tooltip title="Open Remote in New Window">
+                    <IconButton onClick={openPopupWindow}>
+                        <AddIcon />
+                    </IconButton>
+                </Tooltip>
+                <Tooltip title="Settings">
+                    <span>
+                        <IconButton onClick={() => { /* Add settings logic */ }} disabled>
+                            <SettingsIcon />
+                        </IconButton>
+                    </span>
+                </Tooltip>
+                <Tooltip title="About">
+                     <IconButton onClick={() => invoke('open_url', { url: 'https://github.com/mherold1/roku-controller' })}>
+                        <InfoIcon />
                     </IconButton>
                 </Tooltip>
             </Box>
-        </Box>
+        </Drawer>
     );
 };
 

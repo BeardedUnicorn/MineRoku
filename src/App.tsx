@@ -1,90 +1,113 @@
-// src/App.tsx (Corrected)
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { emit, listen } from '@tauri-apps/api/event';
 import Sidebar from './components/Sidebar';
 import RemoteControl from './components/RemoteControl';
 import AppLauncher from './components/AppLauncher';
-import { Box, Typography, Paper, CircularProgress } from '@mui/material';
+import { Box, Typography, Paper, CircularProgress, AppBar, Toolbar, IconButton, useTheme, useMediaQuery } from '@mui/material';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Tv as TvIcon, SearchOff as SearchOffIcon } from '@mui/icons-material';
+import { Tv as TvIcon, SearchOff as SearchOffIcon, Menu as MenuIcon } from '@mui/icons-material';
+import BottomNavBar from './components/BottomNavBar';
 import './App.css';
-import { RokuDevice } from './store';
+import { useAppStore } from './store';
 
 const App: React.FC = () => {
-    const [selectedDevice, setSelectedDevice] = useState<RokuDevice | null>(null);
+    const { selectedDevice } = useAppStore();
     const [isSearching, setIsSearching] = useState(true);
     const [devicesFound, setDevicesFound] = useState(true);
-    const [isSidebarOpen, setIsSidebarOpen] = useState(false); 
+    const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+    const [mobileView, setMobileView] = useState<'remote' | 'apps'>('remote');
+    const theme = useTheme();
+    const isMobile = useMediaQuery(theme.breakpoints.down('md'));
 
-    const handleDeviceSelect = (device: RokuDevice | null) => {
-        setSelectedDevice(device);
+    useEffect(() => {
+        // Keep sidebar closed by default on mobile, open on desktop
+        setIsSidebarOpen(!isMobile);
+    }, [isMobile]);
+
+    useEffect(() => {
+        const unlistenPromise = listen('popup-ready', () => {
+            emit('device-changed', selectedDevice);
+        });
+
+        // Always emit the latest device info. This handles initial load for the popup
+        // and any subsequent changes to the selected device.
+        emit('device-changed', selectedDevice);
+
+        return () => {
+            unlistenPromise.then(unlisten => unlisten());
+        };
+    }, [selectedDevice]);
+
+    const handleToggleSidebar = () => {
+        setIsSidebarOpen(!isSidebarOpen);
     };
 
     const contentVariants = {
         hidden: { opacity: 0, y: 20 },
-        visible: { opacity: 1, y: 0 },
-        exit: { opacity: 0, y: -20 },
+        visible: { opacity: 1, y: 0, transition: { duration: 0.4 } },
+        exit: { opacity: 0, y: -20, transition: { duration: 0.3 } },
     };
 
     const MainContent = () => {
         if (isSearching) {
             return (
-                <Paper sx={{ p: 4, textAlign: 'center', backgroundColor: 'transparent', boxShadow: 'none' }}>
-                    <CircularProgress sx={{ mb: 2 }} />
+                <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 2 }}>
+                    <CircularProgress />
                     <Typography variant="h6" color="text.secondary">
                         Searching for Roku devices...
+                    </Typography>
+                </Box>
+            );
+        }
+
+        if (!devicesFound) {
+            return (
+                <Paper sx={{ p: 4, textAlign: 'center', backgroundColor: 'background.paper', borderRadius: 4, maxWidth: 450, mx: 'auto' }}>
+                    <SearchOffIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
+                    <Typography variant="h6" color="text.secondary">No Roku Devices Found</Typography>
+                    <Typography variant="body1" color="text.secondary" sx={{ mt: 1 }}>
+                       Please ensure your Roku is powered on, connected to the same network, and refresh the list from the sidebar.
                     </Typography>
                 </Paper>
             );
         }
 
-        if (!devicesFound) {
-             return (
-                <Paper sx={{ p: 4, textAlign: 'center', backgroundColor: 'background.paper' }}>
-                    <SearchOffIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
-                    <Typography variant="h6" color="text.secondary">No Roku Devices Found</Typography>
-                    <Typography variant="body1" color="text.secondary" sx={{ mt: 1, maxWidth: 400, mx: 'auto' }}>
-                       Please ensure your Roku is powered on and on the same network. You can refresh the list from the sidebar.
-                    </Typography>
-                </Paper>
-            );
-        }
-        
         if (selectedDevice) {
             return (
-                 <motion.div
+                <motion.div
                     key={selectedDevice.ip}
                     initial="hidden"
                     animate="visible"
                     exit="exit"
                     variants={contentVariants}
-                    transition={{ duration: 0.3 }}
-                    style={{ width: '100%' }}
+                    style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}
                 >
-                    <Typography variant="h4" component="h1" sx={{ mb: 3, textAlign: 'center', color: 'primary.main', fontWeight: 'bold' }}>
-                        {selectedDevice.name}
-                    </Typography>
-                    
-                    {/* Corrected Flexbox Layout */}
-                    <Box sx={{ display: 'flex', alignItems: 'flex-start' }}>
-                        {/* Column 1: Fixed-width container for the remote */}
-                        <Box sx={{ width: 320, flexShrink: 0, marginRight: 5 }}>
-                            <RemoteControl device={selectedDevice} />
+                    {isMobile ? (
+                        // On mobile, the content is one of two views.
+                        <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 1 }}>
+                            {mobileView === 'remote' && <RemoteControl device={selectedDevice} />}
+                            {mobileView === 'apps' && <AppLauncher device={selectedDevice} />}
                         </Box>
-                        
-                        {/* Column 2: Fluid container for AppLauncher with margin-left to prevent overlap */}
-                        <Box sx={{ flexGrow: 1, minWidth: 0, ml: 4 }}>
-                           <AppLauncher device={selectedDevice} />
+                    ) : (
+                        // On desktop, we show both side-by-side.
+                        <Box sx={{ display: 'flex', flexDirection: 'row', gap: 4, flex: 1, overflow: 'hidden' }}>
+                            <Box sx={{ width: 320, flexShrink: 0, mx: 'auto', display: 'flex', justifyContent: 'center', alignItems: 'flex-start' }}>
+                                <RemoteControl device={selectedDevice} />
+                            </Box>
+                            <Box sx={{ flexGrow: 1, minWidth: 0, overflowY: 'auto', pr: 2 }}>
+                               <AppLauncher device={selectedDevice} />
+                            </Box>
                         </Box>
-                    </Box>
+                    )}
                 </motion.div>
             );
         }
 
         return (
-            <Paper sx={{ p: 4, textAlign: 'center', backgroundColor: 'background.paper' }}>
+            <Paper sx={{ p: 4, textAlign: 'center', backgroundColor: 'background.paper', borderRadius: 4, maxWidth: 450, mx: 'auto' }}>
                 <TvIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
                 <Typography variant="h6" color="text.secondary">
-                    Select a device from the sidebar to begin
+                    Select a device to begin
                 </Typography>
             </Paper>
         );
@@ -92,20 +115,48 @@ const App: React.FC = () => {
 
     return (
         <Box className="app-container">
-            <Sidebar 
+            <Sidebar
                 isOpen={isSidebarOpen}
-                onToggle={() => setIsSidebarOpen(!isSidebarOpen)}
-                onDeviceSelect={handleDeviceSelect}
+                onToggle={handleToggleSidebar}
                 setIsSearching={setIsSearching}
                 setDevicesFound={setDevicesFound}
             />
-            <main className="main-content">
-                <AnimatePresence mode="wait">
-                    <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'flex-start', minHeight: '100%', width: '100%' }}>
-                        {MainContent()}
-                    </Box>
-                </AnimatePresence>
-            </main>
+            <Box sx={{ display: 'flex', flexDirection: 'column', flexGrow: 1, height: '100vh', overflow: 'hidden' }}>
+                <AppBar position="static" color="transparent" elevation={0} sx={{
+                    borderBottom: `1px solid ${theme.palette.divider}`,
+                    display: 'flex', 
+                    alignItems: 'center',
+                    flexDirection: 'row',
+                    flexShrink: 0
+                }}>
+                    <Toolbar>
+                        <IconButton
+                            edge="start"
+                            color="inherit"
+                            aria-label="menu"
+                            onClick={handleToggleSidebar}
+                            sx={{ mr: 2 }}
+                        >
+                            <MenuIcon />
+                        </IconButton>
+                        <Typography variant="h6" component="div" sx={{ flexGrow: 1, color: 'primary.main', fontWeight: 'bold' }}>
+                            {selectedDevice ? selectedDevice.name : "Roku Controller"}
+                        </Typography>
+                    </Toolbar>
+                </AppBar>
+
+                <main className={`main-content ${isMobile && selectedDevice ? 'main-content-mobile' : ''}`}>
+                    <AnimatePresence mode="wait">
+                        <Box sx={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', flexGrow: 1, width: '100%' }}>
+                            {MainContent()}
+                        </Box>
+                    </AnimatePresence>
+                </main>
+
+                {isMobile && selectedDevice && (
+                    <BottomNavBar view={mobileView} setView={setMobileView} />
+                )}
+            </Box>
         </Box>
     );
 };

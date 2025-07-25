@@ -31,12 +31,61 @@ interface RokuApp {
     id: string;
     name: string;
     version: string;
-    icon_url?: string;
 }
 
 interface AppLauncherProps {
     device: RokuDevice;
 }
+
+const AppIcon: React.FC<{ device: RokuDevice; appId: string; appName: string }> = ({ device, appId, appName }) => {
+    const [icon, setIcon] = useState<string | null>(null);
+
+    useEffect(() => {
+        const fetchIcon = async () => {
+            try {
+                const iconData: string = await invoke('get_app_icon', { ip: device.ip, port: device.port, appId });
+                setIcon(iconData);
+            } catch (error) {
+                console.error(`Error fetching icon for ${appName}:`, error);
+            }
+        };
+
+        fetchIcon();
+    }, [device, appId, appName]);
+
+    return (
+        <CardMedia
+            sx={{ height: 120, p: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'action.hover' }}
+        >
+            {icon ? <img src={icon} alt={appName} style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain' }} loading="lazy" /> : <CircularProgress size={24} />}
+        </CardMedia>
+    );
+};
+
+const FavoriteAppIcon: React.FC<{ device: RokuDevice; appId: string; appName: string }> = ({ device, appId, appName }) => {
+    const [icon, setIcon] = useState<string | null>(null);
+
+    useEffect(() => {
+        const fetchIcon = async () => {
+            try {
+                const iconData: string = await invoke('get_app_icon', { ip: device.ip, port: device.port, appId });
+                setIcon(iconData);
+            } catch (error) {
+                console.error(`Error fetching icon for ${appName}:`, error);
+            }
+        };
+
+        fetchIcon();
+    }, [device, appId, appName]);
+
+    return (
+        <CardMedia
+            sx={{ height: 64, width: 64, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        >
+            {icon ? <img src={icon} alt={appName} style={{ maxHeight: '100%', maxWidth: '100%' }} /> : <CircularProgress size={24} />}
+        </CardMedia>
+    );
+};
 
 const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
     const [apps, setApps] = useState<RokuApp[]>([]);
@@ -47,9 +96,9 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
     const [currentPage, setCurrentPage] = useState(1);
     const ITEMS_PER_PAGE = 4; // Increased items per page for a better grid view
 
-    const { favoriteApps, actions } = useAppStore((state) => ({
+    const { favoriteApps, toggleFavoriteApp } = useAppStore((state) => ({
         favoriteApps: state.favoriteApps[device.ip] || [],
-        actions: state.actions,
+        toggleFavoriteApp: state.toggleFavoriteApp,
     }));
 
     const fetchApps = async () => {
@@ -137,11 +186,7 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
                                             }
                                         }}
                                     >
-                                        <CardMedia
-                                            sx={{ height: 64, width: 64, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                                        >
-                                            {app.icon_url && <img src={app.icon_url} alt={app.name} style={{ maxHeight: '100%', maxWidth: '100%' }} />}
-                                        </CardMedia>
+                                        <FavoriteAppIcon device={device} appId={app.id} appName={app.name} />
                                     </Card>
                                 </Tooltip>
                             </Box>
@@ -182,19 +227,7 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
                     <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 2 }}>
                         {paginatedApps.map((app) => (
                              <Card key={app.id} sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-                                <CardMedia
-                                    sx={{ height: 120, p: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'action.hover' }}
-                                >
-                                    {app.icon_url && 
-                                        <img
-                                            src={app.icon_url}
-                                            alt={app.name}
-                                            style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain' }}
-                                            loading="lazy"
-                                        />
-                                    }
-                                </CardMedia>
-                                
+                                <AppIcon device={device} appId={app.id} appName={app.name} />
                                 <CardContent sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
                                     <Tooltip title={app.name}>
                                         <Typography variant="h6" sx={{ fontSize: '1rem', fontWeight: 'bold', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -213,7 +246,7 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
                                             {isLaunching === app.id ? 'Launching...' : 'Launch'}
                                         </Button>
                                         <Tooltip title={favoriteApps.includes(app.id) ? "Remove from favorites" : "Add to favorites"}>
-                                            <IconButton onClick={() => actions.toggleFavoriteApp(device.ip, app.id)}>
+                                            <IconButton onClick={() => toggleFavoriteApp(device.ip, app.id)}>
                                                 {favoriteApps.includes(app.id) ? <StarIcon color="primary" /> : <StarBorderIcon />}
                                             </IconButton>
                                         </Tooltip>

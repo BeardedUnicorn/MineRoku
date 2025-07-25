@@ -13,12 +13,11 @@
     "windows": [
       {
         "title": "Roku Remote",
+        "label": "main",
         "fullscreen": false,
         "resizable": true,
-        "width": 1200,
-        "height": 900,
-        "minWidth": 850,
-        "minHeight": 900,
+        "width": 1000,
+        "height": 750,
         "decorations": true,
         "center": true
       }

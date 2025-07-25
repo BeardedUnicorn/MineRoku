@@ -8,9 +8,10 @@ use std::time::Duration;
 use once_cell::sync::Lazy;
 use reqwest::Client;
 use roku::{Device, Key};
+use base64::{engine::general_purpose, Engine as _};
 
 /// Shared HTTP client for discovery and manual requests.
-static HTTP_CLIENT: Lazy<Client> = Lazy::new(|| Client::new());
+static HTTP_CLIENT: Lazy<Client> = Lazy::new(Client::new);
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct RokuDevice {
@@ -24,18 +25,13 @@ pub struct RokuDevice {
 pub struct RokuApp {
     pub id: String,
     pub name: String,
-    // Note: `app_type` was removed. The `roku` v0.2.0 crate does not parse
-    // this attribute from the device's XML response. A frontend update
-    // is required to remove filtering based on this field.
     pub version: String,
-    pub icon_url: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ActiveAppInfo {
     pub name: String,
     pub id: String,
-    pub icon_url: Option<String>,
 }
 
 /// Discover Roku devices via SSDP. This function is correct.
@@ -118,8 +114,6 @@ pub async fn list_roku_apps_impl(
                 name: app.name,
                 // If version is not provided, use a default value.
                 version: app.version.unwrap_or_else(|| "N/A".to_string()),
-                // The icon URL is constructed using the now-guaranteed-to-exist ID.
-                icon_url: Some(format!("http://{}:{}/query/icon/{}", ip, port, &id)),
             })
         })
         .collect();
@@ -192,14 +186,23 @@ pub async fn get_active_app_impl(ip: String, port: u16) -> Result<ActiveAppInfo,
     
     let app_info = ActiveAppInfo {
         name: app.name,
-        // Only generate an icon URL if the app is not the home screen.
-        icon_url: if app_id != "roku" {
-            Some(format!("http://{}:{}/query/icon/{}", ip, port, &app_id))
-        } else {
-            None
-        },
         id: app_id,
     };
 
     Ok(app_info)
+}
+
+
+pub async fn get_app_icon_impl(ip: String, port: u16, app_id: String) -> Result<String, String> {
+    let url = format!("http://{}:{}/query/icon/{}", ip, port, app_id);
+    let response = reqwest::get(&url).await.map_err(|e| e.to_string())?;
+
+    if !response.status().is_success() {
+        return Err(format!("Failed to fetch icon: {}", response.status()));
+    }
+
+    let image_bytes = response.bytes().await.map_err(|e| e.to_string())?;
+    let base64_icon = general_purpose::STANDARD.encode(&image_bytes);
+    let mime_type = "image/png"; // Assuming PNG, Roku uses PNG for icons
+    Ok(format!("data:{};base64,{}", mime_type, base64_icon))
 }

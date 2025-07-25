@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { Window } from "@tauri-apps/api/window";
 import {
   Box,
   Paper,
@@ -11,7 +12,7 @@ import {
   Tooltip,
   Stack,
   Divider,
-  CircularProgress, // Import CircularProgress
+  CircularProgress,
 } from '@mui/material';
 import { motion } from 'framer-motion';
 import {
@@ -32,9 +33,6 @@ import {
   PowerSettingsNew,
 } from '@mui/icons-material';
 
-//
-// Types
-//
 export interface RokuDevice {
   name: string;
   ip: string;
@@ -42,11 +40,9 @@ export interface RokuDevice {
   url: string;
 }
 
-// New interface for ActiveApp
 interface ActiveApp {
   name: string;
   id: string;
-  icon_url?: string;
 }
 
 interface RemoteControlProps {
@@ -69,15 +65,12 @@ interface RemoteButtonProps {
   color?: 'default' | 'primary' | 'info' | 'warning' | 'error';
   variant?: 'flat' | 'filled';
   onSend: (cmd: string) => void;
-  size?: number;
+  size?: number | { xs: number; sm: number };
   ring?: boolean;
   center?: boolean;
   shortcut?: string;
 }
 
-/**
- * Animated button used throughout the remote.
- */
 const RemoteButton: React.FC<RemoteButtonProps> = ({
   cmd,
   label,
@@ -115,6 +108,8 @@ const RemoteButton: React.FC<RemoteButtonProps> = ({
         }
       : {};
 
+  const finalSize = typeof size === 'number' ? { xs: size, sm: size } : size;
+
   return (
     <motion.div
       whileHover={{ scale: 1.08 }}
@@ -137,8 +132,8 @@ const RemoteButton: React.FC<RemoteButtonProps> = ({
           aria-label={label}
             onClick={() => onSend(cmd)}
             sx={{
-              width: size,
-              height: size,
+              width: finalSize,
+              height: finalSize,
               borderRadius: '50%',
               background: bg,
               color: contrast,
@@ -169,11 +164,38 @@ const RemoteButton: React.FC<RemoteButtonProps> = ({
   );
 };
 
-//
-// Mapping helper for backend commands (frontend symbolic -> backend expected).
-//
 const normalizeCommand = (raw: string): string => {
   return raw;
+};
+
+const ActiveAppIcon: React.FC<{ device: RokuDevice; app: ActiveApp }> = ({ device, app }) => {
+    const [icon, setIcon] = useState<string | null>(null);
+
+    useEffect(() => {
+        if (!app || app.id === 'roku') return;
+
+        const fetchIcon = async () => {
+            try {
+                const iconData: string = await invoke('get_app_icon', { ip: device.ip, port: device.port, appId: app.id });
+                setIcon(iconData);
+            } catch (error) {
+                console.error(`Error fetching icon for ${app.name}:`, error);
+            }
+        };
+
+        fetchIcon();
+    }, [device, app]);
+
+    if (!app || app.id === 'roku' || !icon) return null;
+
+    return (
+        <Box
+            component="img"
+            src={icon}
+            sx={{ width: 24, height: 24, borderRadius: 1 }}
+            alt={`${app.name} icon`}
+        />
+    );
 };
 
 const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
@@ -190,46 +212,59 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
     };
   }, []);
 
-  // Effect to fetch the active app periodically
   useEffect(() => {
     if (!device) return;
 
-    let isMounted = true;
+    let intervalId: number | undefined;
 
     const fetchActiveApp = async () => {
-      if (!isMounted) return;
       try {
         const appInfo: ActiveApp = await invoke('get_active_app', {
           ip: device.ip,
           port: device.port
         });
-        if (isMounted) {
-          setActiveApp(appInfo);
-        }
+        if (mountedRef.current) setActiveApp(appInfo);
       } catch (error) {
         console.error("Could not fetch active app:", error);
-        if (isMounted) {
-          setActiveApp(null); // Clear on error
-        }
+        if (mountedRef.current) setActiveApp(null);
       } finally {
-        if (isMounted) {
-            setIsAppLoading(false);
-        }
+        if (mountedRef.current) setIsAppLoading(false);
       }
     };
 
-    // Fetch immediately and then set an interval
-    setIsAppLoading(true);
-    fetchActiveApp();
-    const intervalId = setInterval(fetchActiveApp, 5000); // Poll every 5 seconds
+    const startPolling = () => {
+      if (intervalId) return;
+      setIsAppLoading(true);
+      fetchActiveApp();
+      intervalId = window.setInterval(fetchActiveApp, 5000);
+    };
 
-    // Cleanup function
+    const stopPolling = () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+        intervalId = undefined;
+      }
+    };
+
+    const unlistenFocusPromise = Window.getCurrent().onFocusChanged(({ payload: focused }: { payload: boolean }) => {
+      if (focused) {
+        startPolling();
+      } else {
+        stopPolling();
+      }
+    });
+
+    Window.getCurrent().isFocused().then((focused: boolean) => {
+        if (focused && mountedRef.current) {
+            startPolling();
+        }
+    });
+
     return () => {
-      isMounted = false;
-      clearInterval(intervalId);
+      stopPolling();
+      unlistenFocusPromise.then((unlisten: () => void) => unlisten());
     };
   }, [device]);
-
 
   const sendCommand = useCallback(
     async (command: string) => {
@@ -266,7 +301,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
         case 'arrowdown': sendCommand('down'); break;
         case 'arrowleft': sendCommand('left'); break;
         case 'arrowright': sendCommand('right'); break;
-        case 'enter': case 'return': sendCommand('select'); break;
+        case 'enter': sendCommand('select'); break;
         case ' ': e.preventDefault(); sendCommand('play'); break;
         case 'backspace': case 'escape': sendCommand('back'); break;
         case 'h': sendCommand('home'); break;
@@ -281,9 +316,6 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
     return () => window.removeEventListener('keydown', handler);
   }, [sendCommand]);
 
-  //
-  // Layout sections config
-  //
   const systemButtons: CommandSpec[] = [
     { key: 'back', icon: <ArrowBack />, label: 'Back', shortcut: 'Backspace/Esc' },
     { key: 'home', icon: <Home />, label: 'Home', shortcut: 'H' },
@@ -303,7 +335,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
   ];
 
   const powerButtons: CommandSpec[] = [
-    { key: 'home', icon: <PowerSettingsNew />, label: 'Wake / Home', shortcut: 'H' },
+    { key: 'PowerOff', icon: <PowerSettingsNew />, label: 'Power Off' },
   ];
 
   return (
@@ -311,16 +343,16 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
       elevation={8}
       sx={{
         mx: 'auto',
-        width: 320,
-        maxWidth: '100%',
+        width: '100%',
+        maxWidth: 320,
         borderRadius: '42px',
-        px: 3,
-        py: 4,
+        px: { xs: 2, sm: 3 },
+        py: { xs: 3, sm: 4 },
         position: 'relative',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        gap: 2, // Adjusted gap
+        gap: { xs: 1.5, sm: 2 },
         background: `linear-gradient(145deg, ${theme.palette.background.paper}, ${theme.palette.background.default})`,
         boxShadow: `
           inset 0 1px 2px rgba(255,255,255,0.06),
@@ -335,7 +367,6 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
         Roku Remote
       </Typography>
 
-      {/* Active App Display */}
       <Box sx={{
         display: 'flex',
         alignItems: 'center',
@@ -352,12 +383,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
               <CircularProgress size={20} />
           ) : activeApp && activeApp.id !== 'roku' ? (
               <>
-                  <Box
-                      component="img"
-                      src={activeApp.icon_url}
-                      sx={{ width: 24, height: 24, borderRadius: 1 }}
-                      alt={`${activeApp.name} icon`}
-                  />
+                  <ActiveAppIcon device={device} app={activeApp} />
                   <Typography variant="body2" sx={{ fontWeight: 500 }} noWrap>
                       {activeApp.name}
                   </Typography>
@@ -369,13 +395,12 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
           )}
       </Box>
 
-      {/* System Row */}
       <Stack
         direction="row"
         spacing={2}
         alignItems="center"
         justifyContent="center"
-        sx={{ width: '100%', mt: 1 }} // Added margin top
+        sx={{ width: '100%', mt: 1 }}
       >
         {systemButtons.map((b) => (
           <RemoteButton
@@ -385,21 +410,19 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
             icon={b.icon}
             onSend={sendCommand}
             shortcut={b.shortcut}
-            size={56}
+            size={{ xs: 48, sm: 56 }}
           />
         ))}
       </Stack>
 
-      {/* D-Pad */}
       <Box
         sx={{
           position: 'relative',
-          width: 200,
-          height: 200,
-          mt: 1 // Added margin top
+          width: { xs: 180, sm: 200 },
+          height: { xs: 180, sm: 200 },
+          mt: 1
         }}
       >
-        {/* Outer Ring */}
         <Box
           sx={{
             position: 'absolute',
@@ -413,7 +436,6 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
               '0 4px 10px rgba(0,0,0,0.6), inset 0 2px 4px rgba(255,255,255,0.05)',
           }}
         >
-          {/* Grid for directional buttons */}
           <Box
             sx={{
               position: 'relative',
@@ -433,8 +455,6 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
             <Box sx={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)' }} >
               <RemoteButton cmd="right" label="Right" icon={<KeyboardArrowRight />} onSend={sendCommand} ring shortcut="→" />
             </Box>
-
-            {/* Center Select */}
             <Box sx={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }} >
               <RemoteButton
                 cmd="select"
@@ -444,7 +464,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
                 variant="filled"
                 color="primary"
                 shortcut="Enter"
-                size={72}
+                size={{ xs: 64, sm: 72 }}
                 center
               />
             </Box>
@@ -452,27 +472,25 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
         </Box>
       </Box>
 
-      {/* Playback */}
-      <Stack direction="row" spacing={2} justifyContent="center" alignItems="center" sx={{ width: '100%', mt: 1 }} >
+      <Stack direction="row" spacing={{ xs: 1, sm: 2 }} justifyContent="center" alignItems="center" sx={{ width: '100%', mt: 1 }} >
         {playbackButtons.map((b) => (
-          <RemoteButton key={b.key} cmd={b.key} label={b.label} icon={b.icon} onSend={sendCommand} shortcut={b.shortcut} size={56} />
+          <RemoteButton key={b.key} cmd={b.key} label={b.label} icon={b.icon} onSend={sendCommand} shortcut={b.shortcut} size={{ xs: 48, sm: 56 }} />
         ))}
       </Stack>
 
       <Divider flexItem variant="middle" sx={{ opacity: 0.3, width: '80%', my: 1 }} />
 
-      {/* Volume + Power */}
-      <Stack direction="row" spacing={2} justifyContent="center" alignItems="center" sx={{ width: '100%' }} >
+      <Stack direction="row" spacing={{ xs: 1, sm: 2 }} justifyContent="center" alignItems="center" sx={{ width: '100%' }} >
         {volumeButtons.map((b) => (
-          <RemoteButton key={b.key} cmd={b.key} label={b.label} icon={b.icon} onSend={sendCommand} shortcut={b.shortcut} size={52} />
+          <RemoteButton key={b.key} cmd={b.key} label={b.label} icon={b.icon} onSend={sendCommand} shortcut={b.shortcut} size={{ xs: 44, sm: 52 }} />
         ))}
         {powerButtons.map((b) => (
-            <RemoteButton key={b.key} cmd={b.key} label={b.label} icon={b.icon} onSend={sendCommand} shortcut={b.shortcut} size={52} color="primary" variant="filled" />
+            <RemoteButton key={b.key} cmd={b.key} label={b.label} icon={b.icon} onSend={sendCommand} size={{ xs: 44, sm: 52 }} color="error" />
         ))}
       </Stack>
 
       <Typography variant="caption" sx={{ opacity: 0.6, textAlign: 'center', mt: 1, maxWidth: 260 }} >
-        Use arrow keys / Enter / Space / +/- / Backspace (or Esc) for quick keyboard control.
+        Use arrow keys, Enter, Space, +/-, and Backspace/Esc for keyboard control.
       </Typography>
 
       <Snackbar open={!!feedback} autoHideDuration={3000} onClose={() => setFeedback(null)} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }} >
