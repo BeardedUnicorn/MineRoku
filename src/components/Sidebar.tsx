@@ -124,25 +124,41 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, setIsSearching, set
             <Box sx={{ p: 1, display: 'flex', justifyContent: 'space-around' }}>
                 <Tooltip title="Refresh Device List">
                     <span>
-                        <IconButton onClick={scanForDevices} disabled={isScanning}>
+                        <IconButton
+                            aria-label="Refresh Device List"
+                            onClick={scanForDevices}
+                            disabled={isScanning}
+                        >
                             <RefreshIcon />
                         </IconButton>
                     </span>
                 </Tooltip>
                 <Tooltip title="Open Remote in New Window">
-                    <IconButton onClick={openPopupWindow}>
+                    <IconButton
+                        aria-label="Open Remote in New Window"
+                        onClick={openPopupWindow}
+                    >
                         <AddIcon />
                     </IconButton>
                 </Tooltip>
                 <Tooltip title="Settings">
                     <span>
-                        <IconButton onClick={() => { /* Add settings logic */ }} disabled>
+                        <IconButton
+                            aria-label="Settings"
+                            onClick={() => { /* Add settings logic */ }}
+                            disabled
+                        >
                             <SettingsIcon />
                         </IconButton>
                     </span>
                 </Tooltip>
                 <Tooltip title="About">
-                     <IconButton onClick={() => invoke('open_url', { url: 'https://github.com/mherold1/roku-controller' })}>
+                    <IconButton
+                        aria-label="About"
+                        onClick={() =>
+                            invoke('open_url', { url: 'https://github.com/mherold1/roku-controller' })
+                        }
+                    >
                         <InfoIcon />
                     </IconButton>
                 </Tooltip>
