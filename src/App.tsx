@@ -48,7 +48,7 @@ const App: React.FC = () => {
         exit: { opacity: 0, y: -20, transition: { duration: 0.3 } },
     };
 
-    const MainContent = () => {
+    const MainContentComponent: React.FC = () => {
         if (isSearching) {
             return (
                 <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 2 }}>
@@ -148,7 +148,7 @@ const App: React.FC = () => {
                 <main className={`main-content ${isMobile && selectedDevice ? 'main-content-mobile' : ''}`}>
                     <AnimatePresence mode="wait">
                         <Box sx={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', flexGrow: 1, width: '100%' }}>
-                            {MainContent()}
+                            <MainContentComponent />
                         </Box>
                     </AnimatePresence>
                 </main>
