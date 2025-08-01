@@ -123,8 +123,7 @@ mine-roku/
 │   ├── components/
 │   │   ├── AppLauncher.tsx      # App management component
 │   │   ├── DeviceTabs.tsx       # Device selection component
-│   │   ├── RemoteControl.tsx    # Remote control component
-│   │   └── Button.tsx           # Custom button component
+│   │   └── RemoteControl.tsx    # Remote control component
 │   ├── App.tsx                  # Main app component
 │   ├── main.tsx                 # React entry point
 │   └── theme.ts                 # Material-UI theme
