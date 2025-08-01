@@ -9,7 +9,7 @@ plugins {
 
 // Load Tauri properties
 val tauriProperties = Properties().apply {
-    val propFile = file("tauri.properties")
+    val propFile = project.file("tauri.properties")
     if (propFile.exists()) {
         propFile.inputStream().use { load(it) }
     }
@@ -93,4 +93,4 @@ dependencies {
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.0")
 }
 
-apply(from = "tauri.build.gradle.kts")
+apply(from = project.file("tauri.build.gradle.kts"))
