@@ -25,6 +25,14 @@ open class RustPlugin : Plugin<Project> {
 
         val targetsList = (findProperty("targetList") as? String)?.split(',') ?: listOf("aarch64", "armv7", "i686", "x86_64")
 
+        // archList and targetList must form pairs; ensure both lists are the same size
+        if (archList.size != targetsList.size) {
+            throw IllegalArgumentException(
+                "Configuration error: 'archList' and 'targetList' must have the same number of entries. " +
+                    "Check your Gradle properties."
+            )
+        }
+
         extensions.configure<ApplicationExtension> {
             @Suppress("UnstableApiUsage")
             flavorDimensions.add("abi")
