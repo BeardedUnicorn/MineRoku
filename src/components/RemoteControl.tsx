@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Window } from "@tauri-apps/api/window";
 import { platform } from "@tauri-apps/plugin-os";
@@ -381,27 +381,39 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
     return () => window.removeEventListener('keydown', handler);
   }, [sendCommand]);
 
-  const systemButtons: CommandSpec[] = [
-    { key: 'back', icon: <ArrowBack />, label: 'Back', shortcut: 'Backspace/Esc' },
-    { key: 'home', icon: <Home />, label: 'Home', shortcut: 'H' },
-    { key: 'info', icon: <Info />, label: 'Info', shortcut: 'I' },
-  ];
+  const systemButtons = useMemo<CommandSpec[]>(
+    () => [
+      { key: 'back', icon: <ArrowBack />, label: 'Back', shortcut: 'Backspace/Esc' },
+      { key: 'home', icon: <Home />, label: 'Home', shortcut: 'H' },
+      { key: 'info', icon: <Info />, label: 'Info', shortcut: 'I' },
+    ],
+    [],
+  );
 
-  const volumeButtons: CommandSpec[] = [
-    { key: 'VolumeDown', icon: <VolumeDown />, label: 'Volume Down', shortcut: '-' },
-    { key: 'VolumeMute', icon: <VolumeMute />, label: 'Mute', shortcut: 'M' },
-    { key: 'VolumeUp', icon: <VolumeUp />, label: 'Volume Up', shortcut: '+' },
-  ];
+  const volumeButtons = useMemo<CommandSpec[]>(
+    () => [
+      { key: 'VolumeDown', icon: <VolumeDown />, label: 'Volume Down', shortcut: '-' },
+      { key: 'VolumeMute', icon: <VolumeMute />, label: 'Mute', shortcut: 'M' },
+      { key: 'VolumeUp', icon: <VolumeUp />, label: 'Volume Up', shortcut: '+' },
+    ],
+    [],
+  );
 
-  const playbackButtons: CommandSpec[] = [
-    { key: 'rev', icon: <FastRewind />, label: 'Rewind' },
-    { key: 'play', icon: <PlayArrow />, label: 'Play / Pause', shortcut: 'Space' },
-    { key: 'fwd', icon: <FastForward />, label: 'Fast Forward' },
-  ];
+  const playbackButtons = useMemo<CommandSpec[]>(
+    () => [
+      { key: 'rev', icon: <FastRewind />, label: 'Rewind' },
+      { key: 'play', icon: <PlayArrow />, label: 'Play / Pause', shortcut: 'Space' },
+      { key: 'fwd', icon: <FastForward />, label: 'Fast Forward' },
+    ],
+    [],
+  );
 
-  const powerButtons: CommandSpec[] = [
-    { key: 'PowerOff', icon: <PowerSettingsNew />, label: 'Power Off' },
-  ];
+  const powerButtons = useMemo<CommandSpec[]>(
+    () => [
+      { key: 'PowerOff', icon: <PowerSettingsNew />, label: 'Power Off' },
+    ],
+    [],
+  );
 
   return (
     <Paper
