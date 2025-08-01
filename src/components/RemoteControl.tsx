@@ -329,19 +329,52 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
     const handler = (e: KeyboardEvent) => {
       const key = e.key.toLowerCase();
       switch (key) {
-        case 'arrowup': sendCommand('up'); break;
-        case 'arrowdown': sendCommand('down'); break;
-        case 'arrowleft': sendCommand('left'); break;
-        case 'arrowright': sendCommand('right'); break;
-        case 'enter': sendCommand('select'); break;
-        case ' ': e.preventDefault(); sendCommand('play'); break;
-        case 'backspace': case 'escape': sendCommand('back'); break;
-        case 'h': sendCommand('home'); break;
-        case 'i': sendCommand('info'); break;
-        case 'm': sendCommand('VolumeMute'); break;
-        case '+': case '=': sendCommand('VolumeUp'); break;
-        case '-': case '_': sendCommand('VolumeDown'); break;
-        default: return;
+        case 'arrowup':
+          e.preventDefault();
+          sendCommand('up');
+          break;
+        case 'arrowdown':
+          e.preventDefault();
+          sendCommand('down');
+          break;
+        case 'arrowleft':
+          e.preventDefault();
+          sendCommand('left');
+          break;
+        case 'arrowright':
+          e.preventDefault();
+          sendCommand('right');
+          break;
+        case 'enter':
+          sendCommand('select');
+          break;
+        case ' ':
+          e.preventDefault();
+          sendCommand('play');
+          break;
+        case 'backspace':
+        case 'escape':
+          sendCommand('back');
+          break;
+        case 'h':
+          sendCommand('home');
+          break;
+        case 'i':
+          sendCommand('info');
+          break;
+        case 'm':
+          sendCommand('VolumeMute');
+          break;
+        case '+':
+        case '=':
+          sendCommand('VolumeUp');
+          break;
+        case '-':
+        case '_':
+          sendCommand('VolumeDown');
+          break;
+        default:
+          return;
       }
     };
     window.addEventListener('keydown', handler);
