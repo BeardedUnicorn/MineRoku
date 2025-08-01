@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useAppStore, RokuDevice } from '../store';
 import {
@@ -15,13 +15,12 @@ import {
 interface SidebarProps {
     isOpen: boolean;
     onToggle: () => void;
-    setIsSearching: (isSearching: boolean) => void;
-    setDevicesFound: (devicesFound: boolean) => void;
+    scanForDevices: () => Promise<void>;
+    isScanning: boolean;
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, setIsSearching, setDevicesFound }) => {
-    const { devices, selectedDevice, setDevices, setSelectedDevice } = useAppStore();
-    const [isScanning, setIsScanning] = useState(false);
+const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, scanForDevices, isScanning }) => {
+    const { devices, selectedDevice, setSelectedDevice } = useAppStore();
     const theme = useTheme();
     const isMobile = useMediaQuery(theme.breakpoints.down('md'));
 
@@ -31,43 +30,6 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, setIsSearching, set
             onToggle(); // Close sidebar on selection in mobile view
         }
     };
-
-    const scanForDevices = useCallback(async () => {
-        setIsScanning(true);
-        setIsSearching(true);
-        try {
-            const foundDevices: RokuDevice[] = await invoke('discover_roku_devices');
-            setDevices(foundDevices);
-            const anyDevicesFound = foundDevices.length > 0;
-            setDevicesFound(anyDevicesFound);
-            if (anyDevicesFound) {
-                const previouslySelected = selectedDevice;
-                const stillExists =
-                    previouslySelected &&
-                    foundDevices.find((d) => d.ip === previouslySelected.ip);
-                if (stillExists) {
-                    setSelectedDevice(stillExists);
-                } else {
-                    setSelectedDevice(foundDevices[0]);
-                }
-            } else {
-                // If no devices are found, clear the selection
-                setSelectedDevice(null);
-            }
-        } catch (err) {
-            console.error("Discovery error:", err);
-            setDevicesFound(false);
-            setSelectedDevice(null);
-        } finally {
-            setIsScanning(false);
-            setIsSearching(false);
-        }
-    }, [setDevices, setSelectedDevice, selectedDevice, setIsSearching, setDevicesFound]);
-
-    useEffect(() => {
-        scanForDevices();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []); // Run only once on initial mount
 
     const openPopupWindow = () => {
         invoke('open_popup_window');
