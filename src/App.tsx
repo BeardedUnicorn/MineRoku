@@ -122,16 +122,18 @@ const App: React.FC = () => {
 
     return (
         <Box className="app-container">
-            <Sidebar
-                isOpen={isSidebarOpen}
-                onToggle={handleToggleSidebar}
-                setIsSearching={setIsSearching}
-                setDevicesFound={setDevicesFound}
-            />
+            <Box component="nav" sx={{ flexShrink: 0 }} aria-label="device navigation">
+                <Sidebar
+                    isOpen={isSidebarOpen}
+                    onToggle={handleToggleSidebar}
+                    setIsSearching={setIsSearching}
+                    setDevicesFound={setDevicesFound}
+                />
+            </Box>
             <Box sx={{ display: 'flex', flexDirection: 'column', flexGrow: 1, height: '100vh', overflow: 'hidden' }}>
                 <AppBar position="static" color="transparent" elevation={0} sx={{
                     borderBottom: `1px solid ${theme.palette.divider}`,
-                    display: 'flex', 
+                    display: 'flex',
                     alignItems: 'center',
                     flexDirection: 'row',
                     flexShrink: 0
@@ -152,16 +154,18 @@ const App: React.FC = () => {
                     </Toolbar>
                 </AppBar>
 
-                <main className={`main-content ${isMobile && selectedDevice ? 'main-content-mobile' : ''}`}>
+                <Box component="main" className={`main-content ${isMobile && selectedDevice ? 'main-content-mobile' : ''}`}>
                     <AnimatePresence mode="wait">
                         <Box sx={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', flexGrow: 1, width: '100%' }}>
                             <MainContentComponent />
                         </Box>
                     </AnimatePresence>
-                </main>
+                </Box>
 
                 {isMobile && selectedDevice && (
-                    <BottomNavBar view={mobileView} setView={setMobileView} />
+                    <Box component="nav" aria-label="bottom navigation">
+                        <BottomNavBar view={mobileView} setView={setMobileView} />
+                    </Box>
                 )}
             </Box>
         </Box>
