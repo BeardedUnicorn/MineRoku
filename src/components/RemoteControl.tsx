@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Window } from "@tauri-apps/api/window";
+import { platform } from "@tauri-apps/plugin-os";
 import {
   Box,
   Paper,
@@ -69,6 +70,7 @@ interface RemoteButtonProps {
   ring?: boolean;
   center?: boolean;
   shortcut?: string;
+  currentPlatform?: string | null;
 }
 
 const RemoteButton: React.FC<RemoteButtonProps> = ({
@@ -82,6 +84,7 @@ const RemoteButton: React.FC<RemoteButtonProps> = ({
   color = 'default',
   variant = 'flat',
   shortcut,
+  currentPlatform,
 }) => {
   const theme = useTheme();
 
@@ -119,7 +122,7 @@ const RemoteButton: React.FC<RemoteButtonProps> = ({
       <Tooltip
         arrow
         title={
-          shortcut ? (
+          shortcut && currentPlatform !== 'android' && currentPlatform !== 'ios' ? (
             <Box component="span">
               {label} <Box component="span" sx={{ opacity: 0.6 }}>({shortcut})</Box>
             </Box>
@@ -205,12 +208,46 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
   const [isAppLoading, setIsAppLoading] = useState<boolean>(true);
   const busyRef = useRef<Set<string>>(new Set());
   const mountedRef = useRef(true);
+  const [currentPlatform, setCurrentPlatform] = useState<string | null>(null);
 
   useEffect(() => {
+    const fetchPlatform = async () => {
+      const p = await platform();
+      setCurrentPlatform(p);
+    };
+    fetchPlatform();
     return () => {
       mountedRef.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!device) return;
+
+    const initialFetch = async () => {
+      setIsAppLoading(true);
+      try {
+        const appInfo: ActiveApp = await invoke('get_active_app', {
+          ip: device.ip,
+          port: device.port,
+        });
+        if (mountedRef.current) {
+          setActiveApp(appInfo);
+        }
+      } catch (error) {
+        console.error('Could not fetch active app on initial load:', error);
+        if (mountedRef.current) {
+          setActiveApp(null);
+        }
+      } finally {
+        if (mountedRef.current) {
+          setIsAppLoading(false);
+        }
+      }
+    };
+
+    initialFetch();
+  }, [device]);
 
   useEffect(() => {
     if (!device) return;
@@ -225,16 +262,12 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
         });
         if (mountedRef.current) setActiveApp(appInfo);
       } catch (error) {
-        console.error("Could not fetch active app:", error);
-        if (mountedRef.current) setActiveApp(null);
-      } finally {
-        if (mountedRef.current) setIsAppLoading(false);
+        console.error("Could not fetch active app during polling:", error);
       }
     };
 
     const startPolling = () => {
       if (intervalId) return;
-      setIsAppLoading(true);
       fetchActiveApp();
       intervalId = window.setInterval(fetchActiveApp, 5000);
     };
@@ -411,6 +444,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
             onSend={sendCommand}
             shortcut={b.shortcut}
             size={{ xs: 48, sm: 56 }}
+            currentPlatform={currentPlatform}
           />
         ))}
       </Stack>
@@ -474,7 +508,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
 
       <Stack direction="row" spacing={{ xs: 1, sm: 2 }} justifyContent="center" alignItems="center" sx={{ width: '100%', mt: 1 }} >
         {playbackButtons.map((b) => (
-          <RemoteButton key={b.key} cmd={b.key} label={b.label} icon={b.icon} onSend={sendCommand} shortcut={b.shortcut} size={{ xs: 48, sm: 56 }} />
+          <RemoteButton key={b.key} cmd={b.key} label={b.label} icon={b.icon} onSend={sendCommand} shortcut={b.shortcut} size={{ xs: 48, sm: 56 }} currentPlatform={currentPlatform} />
         ))}
       </Stack>
 
@@ -482,16 +516,18 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
 
       <Stack direction="row" spacing={{ xs: 1, sm: 2 }} justifyContent="center" alignItems="center" sx={{ width: '100%' }} >
         {volumeButtons.map((b) => (
-          <RemoteButton key={b.key} cmd={b.key} label={b.label} icon={b.icon} onSend={sendCommand} shortcut={b.shortcut} size={{ xs: 44, sm: 52 }} />
+          <RemoteButton key={b.key} cmd={b.key} label={b.label} icon={b.icon} onSend={sendCommand} shortcut={b.shortcut} size={{ xs: 44, sm: 52 }} currentPlatform={currentPlatform} />
         ))}
         {powerButtons.map((b) => (
             <RemoteButton key={b.key} cmd={b.key} label={b.label} icon={b.icon} onSend={sendCommand} size={{ xs: 44, sm: 52 }} color="error" />
         ))}
       </Stack>
 
-      <Typography variant="caption" sx={{ opacity: 0.6, textAlign: 'center', mt: 1, maxWidth: 260 }} >
-        Use arrow keys, Enter, Space, +/-, and Backspace/Esc for keyboard control.
-      </Typography>
+      {currentPlatform !== 'android' && currentPlatform !== 'ios' && (
+        <Typography variant="caption" sx={{ opacity: 0.6, textAlign: 'center', mt: 1, maxWidth: 260 }} >
+          Use arrow keys, Enter, Space, +/-, and Backspace/Esc for keyboard control.
+        </Typography>
+      )}
 
       <Snackbar open={!!feedback} autoHideDuration={3000} onClose={() => setFeedback(null)} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }} >
         <Alert onClose={() => setFeedback(null)} severity={feedback?.severity} sx={{ width: '100%' }} >

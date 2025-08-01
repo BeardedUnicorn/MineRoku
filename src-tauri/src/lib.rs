@@ -85,6 +85,7 @@ fn handle_tray_event(app: &AppHandle, event: TrayIconEvent) {
 pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(opener())
+        .plugin(tauri_plugin_os::init())
         .invoke_handler(tauri::generate_handler![
             discover_roku_devices,
             list_roku_apps,

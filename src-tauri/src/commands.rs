@@ -36,7 +36,6 @@ pub struct ActiveAppInfo {
 
 /// Discover Roku devices via SSDP. This function is correct.
 pub async fn discover_roku_devices_impl() -> Result<Vec<RokuDevice>, String> {
-    // ... (This function is unchanged)
     let search_target = SearchTarget::Custom("roku".into(), "ecp".into());
     let mut responses = search(&search_target, Duration::from_secs(3), 2, None)
         .await
@@ -102,7 +101,6 @@ pub async fn list_roku_apps_impl(
 
     let apps_from_crate = device.apps().await.map_err(|e| e.to_string())?;
 
-    // CORRECTED: Handle Option types returned by the `roku` crate gracefully.
     // We use `filter_map` to iterate, ensuring we only include apps that have an ID,
     // as it is essential for launching and fetching icons.
     let apps = apps_from_crate.apps
@@ -132,13 +130,25 @@ pub async fn send_roku_command_impl(
     let device = Device::new(url);
 
     let key = match command.to_lowercase().as_str() {
-        "home"       => Key::Home, "rev"        => Key::Rev, "fwd"        => Key::Fwd,
-        "play"       => Key::Play, "select"     => Key::Select, "left"       => Key::Left,
-        "right"      => Key::Right, "down"       => Key::Down, "up"         => Key::Up,
-        "back"       => Key::Back, "info"       => Key::Info, "backspace"  => Key::Backspace,
-        "search"     => Key::Search, "enter"      => Key::Enter, "volumeup"   => Key::VolumeUp,
-        "volumedown" => Key::VolumeDown, "volumemute" => Key::VolumeMute,
-        other        => return Err(format!("Unknown command: {}", other)),
+        "home"       => Key::Home, 
+        "rev"        => Key::Rev, 
+        "fwd"        => Key::Fwd,
+        "play"       => Key::Play, 
+        "select"     => Key::Select, 
+        "left"       => Key::Left,
+        "right"      => Key::Right, 
+        "down"       => Key::Down, 
+        "up"         => Key::Up,
+        "back"       => Key::Back, 
+        "info"       => Key::Info, 
+        "backspace"  => Key::Backspace,
+        "search"     => Key::Search, 
+        "enter"      => Key::Enter, 
+        "volumeup"   => Key::VolumeUp,
+        "volumedown" => Key::VolumeDown, 
+        "volumemute" => Key::VolumeMute, 
+        "poweroff"   => Key::PowerOff,
+        other  => return Err(format!("Unknown command: {}", other)),
     };
 
     device.keypress(&key).await.map_err(|e| e.to_string())?;

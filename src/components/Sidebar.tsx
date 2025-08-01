@@ -40,10 +40,17 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, setIsSearching, set
             setDevices(foundDevices);
             const anyDevicesFound = foundDevices.length > 0;
             setDevicesFound(anyDevicesFound);
-            if (anyDevicesFound && !selectedDevice) {
-                // Automatically select the first device if none is selected
-                setSelectedDevice(foundDevices[0]);
-            } else if (!anyDevicesFound) {
+            if (anyDevicesFound) {
+                const previouslySelected = selectedDevice;
+                const stillExists =
+                    previouslySelected &&
+                    foundDevices.find((d) => d.ip === previouslySelected.ip);
+                if (stillExists) {
+                    setSelectedDevice(stillExists);
+                } else {
+                    setSelectedDevice(foundDevices[0]);
+                }
+            } else {
                 // If no devices are found, clear the selection
                 setSelectedDevice(null);
             }
