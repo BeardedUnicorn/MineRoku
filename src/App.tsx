@@ -1,21 +1,23 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { emit, listen } from '@tauri-apps/api/event';
+import { invoke } from '@tauri-apps/api/core';
 import Sidebar from './components/Sidebar';
 import RemoteControl from './components/RemoteControl';
 import AppLauncher from './components/AppLauncher';
-import { Box, Typography, Paper, CircularProgress, AppBar, Toolbar, IconButton, useTheme, useMediaQuery } from '@mui/material';
+import { Box, Typography, Paper, CircularProgress, AppBar, Toolbar, IconButton, useTheme, useMediaQuery, Button } from '@mui/material';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Tv as TvIcon, SearchOff as SearchOffIcon, Menu as MenuIcon } from '@mui/icons-material';
+import { Tv as TvIcon, SearchOff as SearchOffIcon, Menu as MenuIcon, Refresh as RefreshIcon } from '@mui/icons-material';
 import BottomNavBar from './components/BottomNavBar';
 import './App.css';
-import { useAppStore } from './store';
+import { useAppStore, RokuDevice } from './store';
 
 const App: React.FC = () => {
-    const { selectedDevice } = useAppStore();
+    const { selectedDevice, setDevices, setSelectedDevice } = useAppStore();
     const [isSearching, setIsSearching] = useState(true);
     const [devicesFound, setDevicesFound] = useState(true);
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [mobileView, setMobileView] = useState<'remote' | 'apps'>('remote');
+    const [isScanning, setIsScanning] = useState(false);
     const theme = useTheme();
     const isMobile = useMediaQuery(theme.breakpoints.down('md'));
     const prefersReducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
@@ -42,6 +44,41 @@ const App: React.FC = () => {
     const handleToggleSidebar = () => {
         setIsSidebarOpen(!isSidebarOpen);
     };
+
+    const scanForDevices = useCallback(async () => {
+        setIsScanning(true);
+        setIsSearching(true);
+        try {
+            const foundDevices: RokuDevice[] = await invoke('discover_roku_devices');
+            setDevices(foundDevices);
+            const anyDevicesFound = foundDevices.length > 0;
+            setDevicesFound(anyDevicesFound);
+            if (anyDevicesFound) {
+                const previouslySelected = selectedDevice;
+                const stillExists =
+                    previouslySelected &&
+                    foundDevices.find((d) => d.ip === previouslySelected.ip);
+                if (stillExists) {
+                    setSelectedDevice(stillExists);
+                } else {
+                    setSelectedDevice(foundDevices[0]);
+                }
+            } else {
+                setSelectedDevice(null);
+            }
+        } catch (err) {
+            console.error("Discovery error:", err);
+            setDevicesFound(false);
+            setSelectedDevice(null);
+        } finally {
+            setIsScanning(false);
+            setIsSearching(false);
+        }
+    }, [selectedDevice, setDevices, setSelectedDevice, setIsSearching, setDevicesFound]);
+
+    useEffect(() => {
+        scanForDevices();
+    }, [scanForDevices]);
 
     const contentVariants = prefersReducedMotion
         ? {
@@ -73,8 +110,16 @@ const App: React.FC = () => {
                     <SearchOffIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
                     <Typography variant="h6" color="text.secondary">No Roku Devices Found</Typography>
                     <Typography variant="body1" color="text.secondary" sx={{ mt: 1 }}>
-                       Please ensure your Roku is powered on, connected to the same network, and refresh the list from the sidebar.
+                       Please ensure your Roku is powered on and connected to the same network. Tap refresh to scan again.
                     </Typography>
+                    <Button
+                        variant="contained"
+                        startIcon={<RefreshIcon />}
+                        sx={{ mt: 2 }}
+                        onClick={scanForDevices}
+                    >
+                        Refresh
+                    </Button>
                 </Paper>
             );
         }
@@ -126,8 +171,8 @@ const App: React.FC = () => {
                 <Sidebar
                     isOpen={isSidebarOpen}
                     onToggle={handleToggleSidebar}
-                    setIsSearching={setIsSearching}
-                    setDevicesFound={setDevicesFound}
+                    scanForDevices={scanForDevices}
+                    isScanning={isScanning}
                 />
             </Box>
             <Box sx={{ display: 'flex', flexDirection: 'column', flexGrow: 1, height: '100vh', overflow: 'hidden' }}>
