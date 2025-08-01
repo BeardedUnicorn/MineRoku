@@ -167,6 +167,10 @@ const RemoteButton: React.FC<RemoteButtonProps> = ({
   );
 };
 
+const ARROW_SIZE = 64;
+const CENTER_SIZE = 72;
+const GAP = 12;
+
 const ActiveAppIcon: React.FC<{ device: RokuDevice; app: ActiveApp }> = ({ device, app }) => {
     const [icon, setIcon] = useState<string | null>(null);
 
@@ -472,19 +476,19 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
               height: '100%',
             }}
           >
-            <Box sx={{ position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)' }} >
-              <RemoteButton cmd="up" label="Up" icon={<KeyboardArrowUp />} onSend={sendCommand} ring shortcut="↑" />
+            <Box sx={{ position: 'absolute', top: GAP, left: '50%', transform: 'translateX(-50%)' }} >
+              <RemoteButton cmd="up" label="Up" icon={<KeyboardArrowUp />} onSend={sendCommand} ring shortcut="↑" size={ARROW_SIZE} />
             </Box>
-            <Box sx={{ position: 'absolute', bottom: 12, left: '50%', transform: 'translateX(-50%)' }} >
-              <RemoteButton cmd="down" label="Down" icon={<KeyboardArrowDown />} onSend={sendCommand} ring shortcut="↓" />
+            <Box sx={{ position: 'absolute', bottom: GAP, left: '50%', transform: 'translateX(-50%)' }} >
+              <RemoteButton cmd="down" label="Down" icon={<KeyboardArrowDown />} onSend={sendCommand} ring shortcut="↓" size={ARROW_SIZE} />
             </Box>
-            <Box sx={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)' }} >
-              <RemoteButton cmd="left" label="Left" icon={<KeyboardArrowLeft />} onSend={sendCommand} ring shortcut="←" />
+            <Box sx={{ position: 'absolute', left: GAP, top: '50%', transform: 'translateY(-50%)' }} >
+              <RemoteButton cmd="left" label="Left" icon={<KeyboardArrowLeft />} onSend={sendCommand} ring shortcut="←" size={ARROW_SIZE} />
             </Box>
-            <Box sx={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)' }} >
-              <RemoteButton cmd="right" label="Right" icon={<KeyboardArrowRight />} onSend={sendCommand} ring shortcut="→" />
+            <Box sx={{ position: 'absolute', right: GAP, top: '50%', transform: 'translateY(-50%)' }} >
+              <RemoteButton cmd="right" label="Right" icon={<KeyboardArrowRight />} onSend={sendCommand} ring shortcut="→" size={ARROW_SIZE} />
             </Box>
-            <Box sx={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }} >
+            <Box sx={{ position: 'absolute', top: `calc(50% - ${CENTER_SIZE / 2}px)`, left: `calc(50% - ${CENTER_SIZE / 2}px)` }} >
               <RemoteButton
                 cmd="select"
                 label="Select / OK"
@@ -493,7 +497,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
                 variant="filled"
                 color="primary"
                 shortcut="Enter"
-                size={{ xs: 64, sm: 72 }}
+                size={CENTER_SIZE}
                 center
               />
             </Box>
