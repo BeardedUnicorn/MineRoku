@@ -18,6 +18,7 @@ const App: React.FC = () => {
     const [mobileView, setMobileView] = useState<'remote' | 'apps'>('remote');
     const theme = useTheme();
     const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+    const prefersReducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
 
     useEffect(() => {
         // Keep sidebar closed by default on mobile, open on desktop
@@ -42,11 +43,17 @@ const App: React.FC = () => {
         setIsSidebarOpen(!isSidebarOpen);
     };
 
-    const contentVariants = {
-        hidden: { opacity: 0, y: 20 },
-        visible: { opacity: 1, y: 0, transition: { duration: 0.4 } },
-        exit: { opacity: 0, y: -20, transition: { duration: 0.3 } },
-    };
+    const contentVariants = prefersReducedMotion
+        ? {
+            hidden: { opacity: 1, y: 0 },
+            visible: { opacity: 1, y: 0 },
+            exit: { opacity: 1, y: 0 },
+        }
+        : {
+            hidden: { opacity: 0, y: 20 },
+            visible: { opacity: 1, y: 0, transition: { duration: 0.4 } },
+            exit: { opacity: 0, y: -20, transition: { duration: 0.3 } },
+        };
 
     const MainContentComponent: React.FC = () => {
         if (isSearching) {
