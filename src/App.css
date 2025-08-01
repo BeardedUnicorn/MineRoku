@@ -9,7 +9,7 @@ html, body, #root {
 
 .app-container {
   display: flex;
-  height: 100vh;
+  height: 100dvh; /* Use dynamic viewport height to account for mobile browser UI */
   background-color: #121212; /* Match theme */
   color: #ffffff;
 }
