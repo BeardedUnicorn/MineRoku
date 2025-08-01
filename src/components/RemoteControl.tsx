@@ -167,10 +167,6 @@ const RemoteButton: React.FC<RemoteButtonProps> = ({
   );
 };
 
-const normalizeCommand = (raw: string): string => {
-  return raw;
-};
-
 const ActiveAppIcon: React.FC<{ device: RokuDevice; app: ActiveApp }> = ({ device, app }) => {
     const [icon, setIcon] = useState<string | null>(null);
 
@@ -302,17 +298,16 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
   const sendCommand = useCallback(
     async (command: string) => {
       if (!device) return;
-      const norm = normalizeCommand(command);
-      if (busyRef.current.has(norm)) return;
-      busyRef.current.add(norm);
+      if (busyRef.current.has(command)) return;
+      busyRef.current.add(command);
       try {
         await invoke('send_roku_command', {
           ip: device.ip,
           port: device.port,
-          command: norm,
+          command,
         });
       } catch (error) {
-        console.error(`Error sending command ${norm}:`, error);
+        console.error(`Error sending command ${command}:`, error);
         if (mountedRef.current) {
           setFeedback({
             message: `Error: ${String(error)}`,
@@ -320,7 +315,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
           });
         }
       } finally {
-        busyRef.current.delete(norm);
+        busyRef.current.delete(command);
       }
     },
     [device]
