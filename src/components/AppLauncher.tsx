@@ -37,13 +37,22 @@ interface AppLauncherProps {
     device: RokuDevice;
 }
 
-const AppIcon: React.FC<{ device: RokuDevice; appId: string; appName: string }> = ({ device, appId, appName }) => {
-    const [icon, setIcon] = useState<string | null>(null);
+// Cache to store loaded app icons and avoid refetching
+const iconCache = new Map<string, string>();
+
+const AppIcon: React.FC<{ device: RokuDevice; appId: string; appName: string; size?: number }> = ({ device, appId, appName, size = 120 }) => {
+    const [icon, setIcon] = useState<string | null>(iconCache.get(appId) ?? null);
 
     useEffect(() => {
+        if (iconCache.has(appId)) {
+            setIcon(iconCache.get(appId) as string);
+            return;
+        }
+
         const fetchIcon = async () => {
             try {
                 const iconData: string = await invoke('get_app_icon', { ip: device.ip, port: device.port, appId });
+                iconCache.set(appId, iconData);
                 setIcon(iconData);
             } catch (error) {
                 console.error(`Error fetching icon for ${appName}:`, error);
@@ -53,36 +62,26 @@ const AppIcon: React.FC<{ device: RokuDevice; appId: string; appName: string }> 
         fetchIcon();
     }, [device, appId, appName]);
 
-    return (
-        <CardMedia
-            sx={{ height: 120, p: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'action.hover' }}
-        >
-            {icon ? <img src={icon} alt={appName} style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain' }} loading="lazy" /> : <CircularProgress size={24} />}
-        </CardMedia>
-    );
-};
-
-const FavoriteAppIcon: React.FC<{ device: RokuDevice; appId: string; appName: string }> = ({ device, appId, appName }) => {
-    const [icon, setIcon] = useState<string | null>(null);
-
-    useEffect(() => {
-        const fetchIcon = async () => {
-            try {
-                const iconData: string = await invoke('get_app_icon', { ip: device.ip, port: device.port, appId });
-                setIcon(iconData);
-            } catch (error) {
-                console.error(`Error fetching icon for ${appName}:`, error);
-            }
-        };
-
-        fetchIcon();
-    }, [device, appId, appName]);
+    const sxProps = {
+        height: size,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        ...(size !== 120 ? { width: size } : { p: 1, backgroundColor: 'action.hover' }),
+    } as const;
 
     return (
-        <CardMedia
-            sx={{ height: 64, width: 64, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-        >
-            {icon ? <img src={icon} alt={appName} style={{ maxHeight: '100%', maxWidth: '100%' }} /> : <CircularProgress size={24} />}
+        <CardMedia sx={sxProps}>
+            {icon ? (
+                <img
+                    src={icon}
+                    alt={appName}
+                    style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain' }}
+                    loading="lazy"
+                />
+            ) : (
+                <CircularProgress size={24} />
+            )}
         </CardMedia>
     );
 };
@@ -186,7 +185,7 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
                                             }
                                         }}
                                     >
-                                        <FavoriteAppIcon device={device} appId={app.id} appName={app.name} />
+                                        <AppIcon device={device} appId={app.id} appName={app.name} size={64} />
                                     </Card>
                                 </Tooltip>
                             </Box>
