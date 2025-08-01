@@ -31,5 +31,5 @@ h1 {
 
 /* Add padding to the bottom to avoid overlap with the BottomNavBar on mobile */
 .main-content-mobile {
-  padding-bottom: 72px; /* height of nav bar + some margin */
+  padding-bottom: calc(72px + env(safe-area-inset-bottom)); /* height of nav bar + inset */
 }

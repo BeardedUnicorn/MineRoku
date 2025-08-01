@@ -14,12 +14,12 @@ const BottomNavBar: React.FC<BottomNavBarProps> = ({ view, setView }) => {
     };
 
     return (
-        <Paper sx={{ position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 1000 }} elevation={3}>
+        <Paper sx={{ position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 1000, paddingBottom: 'env(safe-area-inset-bottom)' }} elevation={3}>
             <BottomNavigation value={view} onChange={handleChange} showLabels>
-                <BottomNavigationAction 
+                <BottomNavigationAction
                     label="Remote"
                     value="remote"
-                    icon={<RemoteControlIcon />} 
+                    icon={<RemoteControlIcon />}
                 />
                 <BottomNavigationAction 
                     label="Apps"
