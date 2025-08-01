@@ -17,22 +17,19 @@ import {
 } from '@mui/material';
 import { motion, useReducedMotion } from 'framer-motion';
 import {
-  Home,
-  ArrowBack,
-  Info,
-  PlayArrow,
-  FastRewind,
-  FastForward,
   KeyboardArrowUp,
   KeyboardArrowDown,
   KeyboardArrowLeft,
   KeyboardArrowRight,
   RadioButtonChecked,
-  VolumeUp,
-  VolumeDown,
-  VolumeMute,
-  PowerSettingsNew,
 } from '@mui/icons-material';
+import {
+  CommandSpec,
+  systemButtonSpecs,
+  volumeButtonSpecs,
+  playbackButtonSpecs,
+  powerButtonSpecs,
+} from './RemoteButtonSpecs';
 
 export interface RokuDevice {
   name: string;
@@ -52,12 +49,6 @@ interface RemoteControlProps {
 
 type FeedbackState = { message: string; severity: 'success' | 'error' } | null;
 
-interface CommandSpec {
-  key: string;
-  icon: React.ReactNode;
-  label: string;
-  shortcut?: string;
-}
 
 interface RemoteButtonProps {
   cmd: string;
@@ -382,39 +373,13 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
     return () => window.removeEventListener('keydown', handler);
   }, [sendCommand]);
 
-  const systemButtons = useMemo<CommandSpec[]>(
-    () => [
-      { key: 'back', icon: <ArrowBack />, label: 'Back', shortcut: 'Backspace/Esc' },
-      { key: 'home', icon: <Home />, label: 'Home', shortcut: 'H' },
-      { key: 'info', icon: <Info />, label: 'Info', shortcut: 'I' },
-    ],
-    [],
-  );
+  const systemButtons = useMemo<CommandSpec[]>(() => systemButtonSpecs, []);
 
-  const volumeButtons = useMemo<CommandSpec[]>(
-    () => [
-      { key: 'VolumeDown', icon: <VolumeDown />, label: 'Volume Down', shortcut: '-' },
-      { key: 'VolumeMute', icon: <VolumeMute />, label: 'Mute', shortcut: 'M' },
-      { key: 'VolumeUp', icon: <VolumeUp />, label: 'Volume Up', shortcut: '+' },
-    ],
-    [],
-  );
+  const volumeButtons = useMemo<CommandSpec[]>(() => volumeButtonSpecs, []);
 
-  const playbackButtons = useMemo<CommandSpec[]>(
-    () => [
-      { key: 'rev', icon: <FastRewind />, label: 'Rewind' },
-      { key: 'play', icon: <PlayArrow />, label: 'Play / Pause', shortcut: 'Space' },
-      { key: 'fwd', icon: <FastForward />, label: 'Fast Forward' },
-    ],
-    [],
-  );
+  const playbackButtons = useMemo<CommandSpec[]>(() => playbackButtonSpecs, []);
 
-  const powerButtons = useMemo<CommandSpec[]>(
-    () => [
-      { key: 'PowerOff', icon: <PowerSettingsNew />, label: 'Power Off' },
-    ],
-    [],
-  );
+  const powerButtons = useMemo<CommandSpec[]>(() => powerButtonSpecs, []);
 
   return (
     <Paper
