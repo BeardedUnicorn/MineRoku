@@ -234,15 +234,31 @@ pub async fn get_app_icon_impl(ip: String, port: u16, app_id: String) -> Result<
 /// Create or show the remote popup window.
 pub fn open_popup_window_impl(app: &AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("remote_popup") {
-        window.show().map_err(|e| e.to_string())?;
-        window.set_focus().map_err(|e| e.to_string())?;
+        // Some window operations like showing or focusing are not
+        // available on mobile platforms.
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        {
+            window.show().map_err(|e| e.to_string())?;
+            window.set_focus().map_err(|e| e.to_string())?;
+        }
     } else {
-        WebviewWindowBuilder::new(app, "remote_popup", WebviewUrl::App("index.html".into()))
-            .title("Roku Remote")
-            .resizable(false)
-            .inner_size(400.0, 700.0)
-            .build()
-            .map_err(|e| e.to_string())?;
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        {
+            WebviewWindowBuilder::new(app, "remote_popup", WebviewUrl::App("index.html".into()))
+                .title("Roku Remote")
+                .resizable(false)
+                .inner_size(400.0, 700.0)
+                .build()
+                .map_err(|e| e.to_string())?;
+        }
+        #[cfg(any(target_os = "android", target_os = "ios"))]
+        {
+            WebviewWindowBuilder::new(app, "remote_popup", WebviewUrl::App("index.html".into()))
+                .resizable(false)
+                .inner_size(400.0, 700.0)
+                .build()
+                .map_err(|e| e.to_string())?;
+        }
     }
     Ok(())
 }
