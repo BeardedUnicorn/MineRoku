@@ -1,14 +1,15 @@
 // src-tauri/src/commands.rs
 
-use serde::{Deserialize, Serialize};
-use url::Url;
-use ssdp_client::{search, SearchTarget};
+use base64::{engine::general_purpose, Engine as _};
 use futures_util::stream::StreamExt;
-use std::time::Duration;
 use once_cell::sync::Lazy;
 use reqwest::Client;
 use roku::{Device, Key};
-use base64::{engine::general_purpose, Engine as _};
+use serde::{Deserialize, Serialize};
+use ssdp_client::{search, SearchTarget};
+use std::time::Duration;
+use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
+use url::Url;
 
 /// Shared HTTP client for discovery and manual requests.
 static HTTP_CLIENT: Lazy<Client> = Lazy::new(Client::new);
@@ -91,10 +92,7 @@ pub async fn discover_roku_devices_impl() -> Result<Vec<RokuDevice>, String> {
 }
 
 /// List installed apps on a Roku device.
-pub async fn list_roku_apps_impl(
-    ip: String,
-    port: u16,
-) -> Result<Vec<RokuApp>, String> {
+pub async fn list_roku_apps_impl(ip: String, port: u16) -> Result<Vec<RokuApp>, String> {
     let base_url = format!("http://{}:{}", ip, port);
     let url = Url::parse(&base_url).map_err(|e| e.to_string())?;
     let device = Device::new(url);
@@ -103,7 +101,8 @@ pub async fn list_roku_apps_impl(
 
     // We use `filter_map` to iterate, ensuring we only include apps that have an ID,
     // as it is essential for launching and fetching icons.
-    let apps = apps_from_crate.apps
+    let apps = apps_from_crate
+        .apps
         .into_iter()
         .filter_map(|app| {
             // If an app has no ID, we cannot use it. so we skip it.
@@ -115,7 +114,7 @@ pub async fn list_roku_apps_impl(
             })
         })
         .collect();
-    
+
     Ok(apps)
 }
 
@@ -130,25 +129,25 @@ pub async fn send_roku_command_impl(
     let device = Device::new(url);
 
     let key = match command.to_lowercase().as_str() {
-        "home"       => Key::Home, 
-        "rev"        => Key::Rev, 
-        "fwd"        => Key::Fwd,
-        "play"       => Key::Play, 
-        "select"     => Key::Select, 
-        "left"       => Key::Left,
-        "right"      => Key::Right, 
-        "down"       => Key::Down, 
-        "up"         => Key::Up,
-        "back"       => Key::Back, 
-        "info"       => Key::Info, 
-        "backspace"  => Key::Backspace,
-        "search"     => Key::Search, 
-        "enter"      => Key::Enter, 
-        "volumeup"   => Key::VolumeUp,
-        "volumedown" => Key::VolumeDown, 
-        "volumemute" => Key::VolumeMute, 
-        "poweroff"   => Key::PowerOff,
-        other  => return Err(format!("Unknown command: {}", other)),
+        "home" => Key::Home,
+        "rev" => Key::Rev,
+        "fwd" => Key::Fwd,
+        "play" => Key::Play,
+        "select" => Key::Select,
+        "left" => Key::Left,
+        "right" => Key::Right,
+        "down" => Key::Down,
+        "up" => Key::Up,
+        "back" => Key::Back,
+        "info" => Key::Info,
+        "backspace" => Key::Backspace,
+        "search" => Key::Search,
+        "enter" => Key::Enter,
+        "volumeup" => Key::VolumeUp,
+        "volumedown" => Key::VolumeDown,
+        "volumemute" => Key::VolumeMute,
+        "poweroff" => Key::PowerOff,
+        other => return Err(format!("Unknown command: {}", other)),
     };
 
     device.keypress(&key).await.map_err(|e| e.to_string())?;
@@ -157,11 +156,7 @@ pub async fn send_roku_command_impl(
 }
 
 /// Correctly implemented manual POST request for launching apps.
-pub async fn launch_roku_app_impl(
-    ip: String,
-    port: u16,
-    app_id: String,
-) -> Result<String, String> {
+pub async fn launch_roku_app_impl(ip: String, port: u16, app_id: String) -> Result<String, String> {
     let endpoint = format!("http://{}:{}/launch/{}", ip, port, app_id);
     eprintln!("→ Roku launch URL: {}", endpoint);
 
@@ -171,11 +166,14 @@ pub async fn launch_roku_app_impl(
         .await
         .map_err(|e| format!("Network error: {}", e))?;
     let status = resp.status();
-    let body   = resp.text().await.unwrap_or_default();
+    let body = resp.text().await.unwrap_or_default();
     eprintln!("← status: {}, body: {}", status, body);
 
     if status.is_success() {
-        Ok(format!("Launched '{}' on {}:{} (status {})", app_id, ip, port, status))
+        Ok(format!(
+            "Launched '{}' on {}:{} (status {})",
+            app_id, ip, port, status
+        ))
     } else {
         Err(format!("Error {} from Roku: {}", status, body))
     }
@@ -188,12 +186,12 @@ pub async fn get_active_app_impl(ip: String, port: u16) -> Result<ActiveAppInfo,
     let device = Device::new(url);
 
     let active_app = device.active_app().await.map_err(|e| e.to_string())?;
-    
+
     // CORRECTED: Handle the case where the active app is the home screen,
     // which may not have an ID. Default to "roku" for compatibility with the frontend.
     let app = active_app.app;
     let app_id = app.id.unwrap_or_else(|| "roku".to_string());
-    
+
     let app_info = ActiveAppInfo {
         name: app.name,
         id: app_id,
@@ -201,7 +199,6 @@ pub async fn get_active_app_impl(ip: String, port: u16) -> Result<ActiveAppInfo,
 
     Ok(app_info)
 }
-
 
 pub async fn get_app_icon_impl(ip: String, port: u16, app_id: String) -> Result<String, String> {
     let url = format!("http://{}:{}/query/icon/{}", ip, port, app_id);
@@ -215,4 +212,20 @@ pub async fn get_app_icon_impl(ip: String, port: u16, app_id: String) -> Result<
     let base64_icon = general_purpose::STANDARD.encode(&image_bytes);
     let mime_type = "image/png"; // Assuming PNG, Roku uses PNG for icons
     Ok(format!("data:{};base64,{}", mime_type, base64_icon))
+}
+
+/// Create or show the remote popup window.
+pub fn open_popup_window_impl(app: AppHandle) -> Result<(), String> {
+    if let Some(popup) = app.get_webview_window("remote_popup") {
+        popup.show().map_err(|e| e.to_string())?;
+        popup.set_focus().map_err(|e| e.to_string())?;
+    } else {
+        WebviewWindowBuilder::new(&app, "remote_popup", WebviewUrl::App("popup".into()))
+            .title("Roku Remote")
+            .resizable(false)
+            .inner_size(350.0, 650.0)
+            .build()
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }

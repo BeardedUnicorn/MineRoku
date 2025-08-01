@@ -5,12 +5,14 @@ pub mod commands;
 
 #[cfg(desktop)]
 use tauri::tray::TrayIconEvent;
+use tauri::AppHandle;
 #[cfg(desktop)]
-use tauri::{AppHandle, Manager, PhysicalPosition, WindowEvent};
+use tauri::{Manager, PhysicalPosition, WindowEvent};
 
 use commands::{
-    discover_roku_devices_impl, get_active_app_impl, launch_roku_app_impl, list_roku_apps_impl,
-    send_roku_command_impl, ActiveAppInfo, RokuApp, RokuDevice, get_app_icon_impl
+    discover_roku_devices_impl, get_active_app_impl, get_app_icon_impl, launch_roku_app_impl,
+    list_roku_apps_impl, open_popup_window_impl, send_roku_command_impl, ActiveAppInfo, RokuApp,
+    RokuDevice,
 };
 
 use tauri::command;
@@ -27,20 +29,12 @@ async fn list_roku_apps(ip: String, port: u16) -> Result<Vec<RokuApp>, String> {
 }
 
 #[command]
-async fn send_roku_command(
-    ip: String,
-    port: u16,
-    command: String,
-) -> Result<String, String> {
+async fn send_roku_command(ip: String, port: u16, command: String) -> Result<String, String> {
     send_roku_command_impl(ip, port, command).await
 }
 
 #[command]
-async fn launch_roku_app(
-    ip: String,
-    port: u16,
-    app_id: String,
-) -> Result<String, String> {
+async fn launch_roku_app(ip: String, port: u16, app_id: String) -> Result<String, String> {
     launch_roku_app_impl(ip, port, app_id).await
 }
 
@@ -52,6 +46,11 @@ async fn get_active_app(ip: String, port: u16) -> Result<ActiveAppInfo, String> 
 #[command]
 async fn get_app_icon(ip: String, port: u16, app_id: String) -> Result<String, String> {
     get_app_icon_impl(ip, port, app_id).await
+}
+
+#[command]
+fn open_popup_window(app: AppHandle) -> Result<(), String> {
+    open_popup_window_impl(app)
 }
 
 #[cfg(desktop)]
@@ -92,7 +91,8 @@ pub fn run() {
             send_roku_command,
             launch_roku_app,
             get_active_app,
-            get_app_icon
+            get_app_icon,
+            open_popup_window
         ]);
 
     #[cfg(desktop)]
