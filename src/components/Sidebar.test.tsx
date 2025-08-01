@@ -29,8 +29,10 @@ describe('Sidebar', () => {
     await userEvent.click(deviceItem);
     expect(useAppStore.getState().selectedDevice).toEqual(device);
 
-    // Refresh button
-    await userEvent.click(screen.getByLabelText(/refresh device list/i));
+    // Refresh button - MUI wraps the button in a span that duplicates the label,
+    // so select the actual button element.
+    const refreshBtns = screen.getAllByLabelText(/refresh device list/i);
+    await userEvent.click(refreshBtns[refreshBtns.length - 1]);
     expect(scanForDevices).toHaveBeenCalled();
   });
 
@@ -38,7 +40,9 @@ describe('Sidebar', () => {
     const scanForDevices = vi.fn();
     renderWithTheme(<Sidebar isOpen onToggle={() => {}} scanForDevices={scanForDevices} isScanning={false} />);
 
-    await userEvent.click(screen.getByLabelText(/open remote in new window/i));
+    // Multiple controls may share the same label; retrieve the first.
+    const [openBtn] = screen.getAllByLabelText(/open remote in new window/i);
+    await userEvent.click(openBtn);
     expect(invoke).toHaveBeenCalledWith('open_popup_window');
   });
 });
