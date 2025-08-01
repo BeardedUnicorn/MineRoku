@@ -15,7 +15,7 @@ import {
   Divider,
   CircularProgress,
 } from '@mui/material';
-import { motion } from 'framer-motion';
+import { motion, useReducedMotion } from 'framer-motion';
 import {
   Home,
   ArrowBack,
@@ -87,6 +87,7 @@ const RemoteButton: React.FC<RemoteButtonProps> = ({
   currentPlatform,
 }) => {
   const theme = useTheme();
+  const prefersReducedMotion = useReducedMotion();
 
   const contrast =
     color === 'primary'
@@ -115,8 +116,8 @@ const RemoteButton: React.FC<RemoteButtonProps> = ({
 
   return (
     <motion.div
-      whileHover={{ scale: 1.08 }}
-      whileTap={{ scale: 0.92 }}
+      whileHover={prefersReducedMotion ? undefined : { scale: 1.08 }}
+      whileTap={prefersReducedMotion ? undefined : { scale: 0.92 }}
       style={{ display: 'inline-flex' }}
     >
       <Tooltip
