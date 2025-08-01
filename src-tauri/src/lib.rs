@@ -4,14 +4,13 @@
 pub mod commands;
 
 #[cfg(desktop)]
-use tauri::tray::TrayIconEvent;
+use tauri::tray::{TrayIconBuilder, TrayIconEvent};
 #[cfg(desktop)]
-use tauri::{AppHandle, Manager, PhysicalPosition, WindowEvent};
+use tauri::{AppHandle, Icon, Manager};
 
 use commands::{
     discover_roku_devices_impl, get_active_app_impl, get_app_icon_impl, launch_roku_app_impl,
-    list_roku_apps_impl, open_popup_window_impl, send_roku_command_impl, ActiveAppInfo, RokuApp,
-    RokuDevice,
+    list_roku_apps_impl, send_roku_command_impl, ActiveAppInfo, RokuApp, RokuDevice,
 };
 
 use tauri::command;
@@ -47,34 +46,14 @@ async fn get_app_icon(ip: String, port: u16, app_id: String) -> Result<String, S
     get_app_icon_impl(ip, port, app_id).await
 }
 
-#[command]
-fn open_popup_window(app: tauri::AppHandle) -> Result<(), String> {
-    open_popup_window_impl(&app)
-}
-
 #[cfg(desktop)]
 fn handle_tray_event(app: &AppHandle, event: TrayIconEvent) {
-    if let Some(popup) = app.get_webview_window("remote_popup") {
-        match event {
-            TrayIconEvent::Click {
-                button, position, ..
-            } => {
-                if button == tauri::tray::MouseButton::Left {
-                    if popup.is_visible().unwrap_or(false) {
-                        popup.hide().unwrap();
-                    } else {
-                        let window_size = popup.outer_size().unwrap();
-                        let physical_pos = PhysicalPosition {
-                            x: position.x as i32 - (window_size.width / 2) as i32,
-                            y: position.y as i32 - window_size.height as i32,
-                        };
-                        popup.set_position(physical_pos).unwrap();
-                        popup.show().unwrap();
-                        popup.set_focus().unwrap();
-                    }
-                }
+    if let TrayIconEvent::Click { button, .. } = event {
+        if button == tauri::tray::MouseButton::Left {
+            if let Some(main) = app.get_webview_window("main") {
+                main.show().unwrap();
+                main.set_focus().unwrap();
             }
-            _ => {}
         }
     }
 }
@@ -90,20 +69,18 @@ pub fn run() {
             send_roku_command,
             launch_roku_app,
             get_active_app,
-            get_app_icon,
-            open_popup_window
+            get_app_icon
         ]);
 
     #[cfg(desktop)]
     let builder = builder
-        .on_tray_icon_event(handle_tray_event)
-        .on_window_event(|window, event| {
-            if let WindowEvent::Focused(false) = event {
-                if window.label() == "remote_popup" {
-                    window.hide().unwrap();
-                }
-            }
-        });
+        .setup(|app| {
+            TrayIconBuilder::new()
+                .icon(Icon::Raw(include_bytes!("../../app-logo.png").to_vec()))
+                .build(app)?;
+            Ok(())
+        })
+        .on_tray_icon_event(handle_tray_event);
 
     builder
         .run(tauri::generate_context!())

@@ -8,8 +8,7 @@ import {
 import {
     Refresh as RefreshIcon,
     Settings as SettingsIcon,
-    Info as InfoIcon,
-    Add as AddIcon
+    Info as InfoIcon
 } from '@mui/icons-material';
 
 interface SidebarProps {
@@ -68,10 +67,6 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, setIsSearching, set
         scanForDevices();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []); // Run only once on initial mount
-
-    const openPopupWindow = () => {
-        invoke('open_popup_window');
-    };
 
     const drawerWidth = 280;
 
@@ -132,14 +127,6 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, setIsSearching, set
                             <RefreshIcon />
                         </IconButton>
                     </span>
-                </Tooltip>
-                <Tooltip title="Open Remote in New Window">
-                    <IconButton
-                        aria-label="Open Remote in New Window"
-                        onClick={openPopupWindow}
-                    >
-                        <AddIcon />
-                    </IconButton>
                 </Tooltip>
                 <Tooltip title="Settings">
                     <span>
