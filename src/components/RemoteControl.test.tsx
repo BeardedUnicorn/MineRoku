@@ -51,7 +51,9 @@ describe('RemoteControl', () => {
 
     renderWithTheme(<RemoteControl device={device} />);
 
-    const playBtn = await screen.findByLabelText('Play / Pause');
+    // Multiple play/pause buttons are rendered (cloned elements used by MUI),
+    // so select the first match rather than relying on a singular query.
+    const [playBtn] = await screen.findAllByLabelText('Play / Pause');
     await userEvent.click(playBtn);
     expect(await screen.findByText(/error/i)).toBeInTheDocument();
   });

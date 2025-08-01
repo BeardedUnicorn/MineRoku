@@ -1,5 +1,10 @@
-import '@testing-library/jest-dom';
+// Use the vitest-compatible version of jest-dom which expects vitest's global
+// `expect`. Importing the jest-specific build causes a ReferenceError because
+// the global `expect` isn't defined when the module evaluates. The vitest
+// entry point patches vitest's `expect` instead.
+import '@testing-library/jest-dom/vitest';
 import { vi } from 'vitest';
+import React from 'react';
 
 class ResizeObserverMock {
   observe() {}
@@ -30,4 +35,10 @@ vi.mock('@tauri-apps/api/window', () => ({
 
 vi.mock('@tauri-apps/plugin-os', () => ({
   platform: vi.fn(() => Promise.resolve('linux')),
+}));
+
+// Mock out react-transition-group to avoid running animations during tests.
+vi.mock('react-transition-group', () => ({
+  TransitionGroup: ({ children }: { children: React.ReactNode }) => React.createElement(React.Fragment, null, children),
+  CSSTransition: ({ children }: { children: React.ReactNode }) => React.createElement(React.Fragment, null, children),
 }));
