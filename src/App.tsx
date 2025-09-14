@@ -12,7 +12,7 @@ import './App.css';
 import { useAppStore, RokuDevice } from './store';
 
 const App: React.FC = () => {
-    const { selectedDevice, setDevices, setSelectedDevice } = useAppStore();
+    const { selectedDevice, addDiscoveredDevices, setSelectedDevice } = useAppStore();
     const [isSearching, setIsSearching] = useState(true);
     const [devicesFound, setDevicesFound] = useState(true);
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -50,19 +50,19 @@ const App: React.FC = () => {
         setIsSearching(true);
         try {
             const foundDevices: RokuDevice[] = await invoke('discover_roku_devices');
-            setDevices(foundDevices);
+            addDiscoveredDevices(foundDevices);
             const anyDevicesFound = foundDevices.length > 0;
             setDevicesFound(anyDevicesFound);
-            if (anyDevicesFound) {
-                const previouslySelected = selectedDevice;
-                const stillExists =
-                    previouslySelected &&
-                    foundDevices.find((d) => d.ip === previouslySelected.ip);
+            if (selectedDevice) {
+                const stillExists = foundDevices.find((d) => d.ip === selectedDevice.ip);
                 if (stillExists) {
                     setSelectedDevice(stillExists);
                 } else {
-                    setSelectedDevice(foundDevices[0]);
+                    const offline = useAppStore.getState().devices.find((d) => d.ip === selectedDevice.ip) || null;
+                    setSelectedDevice(offline);
                 }
+            } else if (anyDevicesFound) {
+                setSelectedDevice(foundDevices[0]);
             } else {
                 setSelectedDevice(null);
             }
@@ -74,10 +74,12 @@ const App: React.FC = () => {
             setIsScanning(false);
             setIsSearching(false);
         }
-    }, [selectedDevice, setDevices, setSelectedDevice, setIsSearching, setDevicesFound]);
+    }, [selectedDevice, addDiscoveredDevices, setSelectedDevice, setIsSearching, setDevicesFound]);
 
     useEffect(() => {
         scanForDevices();
+        const intervalId = setInterval(scanForDevices, 30000);
+        return () => clearInterval(intervalId);
     }, [scanForDevices]);
 
     const contentVariants = prefersReducedMotion
