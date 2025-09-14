@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { invoke } from '@tauri-apps/api/core';
 import { Window } from "@tauri-apps/api/window";
 import { platform } from "@tauri-apps/plugin-os";
+import { iconCache, ICON_CACHE_TTL_MS, ICON_CACHE_LIMIT } from '../iconCache';
 import {
   Box,
   Paper,
@@ -166,21 +167,45 @@ const DPAD_SIZE = CENTER_SIZE + ARROW_SIZE * 2 + GAP * 4;
 
 const ActiveAppIcon: React.FC<{ device: RokuDevice; app: ActiveApp }> = ({ device, app }) => {
     const [icon, setIcon] = useState<string | null>(null);
+    const lastKeyRef = useRef<string | null>(null);
 
     useEffect(() => {
-        if (!app || app.id === 'roku') return;
+        if (!app || app.id === 'roku') {
+            setIcon(null);
+            lastKeyRef.current = null;
+            return;
+        }
 
-        const fetchIcon = async () => {
+        const cacheKey = `${device.ip}:${app.id}`;
+        if (lastKeyRef.current === cacheKey) return;
+
+        const loadIcon = async () => {
+            const cached = iconCache.get(cacheKey);
+            if (cached && Date.now() - cached.timestamp < ICON_CACHE_TTL_MS) {
+                setIcon(cached.data);
+                lastKeyRef.current = cacheKey;
+                return;
+            } else if (cached) {
+                iconCache.delete(cacheKey);
+            }
+
+            setIcon(null);
             try {
                 const iconData: string = await invoke('get_app_icon', { ip: device.ip, port: device.port, app_id: app.id });
+                iconCache.set(cacheKey, { data: iconData, timestamp: Date.now() });
+                if (iconCache.size > ICON_CACHE_LIMIT) {
+                    const oldestKey = iconCache.keys().next().value as string;
+                    iconCache.delete(oldestKey);
+                }
                 setIcon(iconData);
+                lastKeyRef.current = cacheKey;
             } catch (error) {
                 console.error(`Error fetching icon for ${app.name}:`, error);
             }
         };
 
-        fetchIcon();
-    }, [device, app]);
+        loadIcon();
+    }, [device.ip, app.id]);
 
     if (!app || app.id === 'roku' || !icon) return null;
 

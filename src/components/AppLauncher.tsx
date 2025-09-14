@@ -25,6 +25,7 @@ import {
     StarBorder as StarBorderIcon,
 } from '@mui/icons-material';
 import { useAppStore, RokuDevice } from '../store';
+import { iconCache, ICON_CACHE_TTL_MS, ICON_CACHE_LIMIT } from '../iconCache';
 
 // Updated interface: `app_type` has been removed to match the backend struct.
 interface RokuApp {
@@ -40,14 +41,6 @@ interface AppLauncherProps {
 // Cache to store loaded app icons and avoid refetching
 // Uses a composite key of `${ip}:${appId}` to scope icons per device
 // and includes a simple size limit to prevent unbounded growth.
-interface IconCacheEntry {
-  data: string;
-  timestamp: number;
-}
-
-const ICON_CACHE_LIMIT = 100;
-const ICON_CACHE_TTL_MS = 1000 * 60 * 60; // 1 hour
-const iconCache = new Map<string, IconCacheEntry>();
 
 const AppIcon: React.FC<{ device: RokuDevice; appId: string; appName: string; size?: number }> = ({ device, appId, appName, size = 120 }) => {
     const cacheKey = `${device.ip}:${appId}`;
