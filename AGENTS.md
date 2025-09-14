@@ -1,0 +1,40 @@
+# Repository Guidelines
+
+## Project Structure & Module Organization
+- Frontend (`src/`): React + TypeScript app. Components in `src/components/` and styles in `src/*.css`.
+- Backend (`src-tauri/`): Tauri 2 Rust app (`src-tauri/src/{main.rs,lib.rs,commands.rs}`), config in `src-tauri/tauri.conf.json`.
+- Rust crates (`crates/`): Reusable libraries (`crates/roku`, `crates/ssdp-client`).
+- Assets: `public/` (static), `src/assets/` (bundled), icons under `src-tauri/icons/`.
+- Tests: colocated as `*.test.tsx` under `src/` with setup in `src/setupTests.ts`.
+
+## Build, Test, and Development Commands
+- `npm run tauri dev` — Run desktop app with hot reload (frontend + Rust backend).
+- `npm run dev` — Run Vite dev server for frontend-only.
+- `npm run build` — Type-check (`tsc`) then build frontend for production.
+- `npm run tauri build` — Build/bundle the desktop app.
+- `npm test` — Run Vitest with coverage (text + HTML report).
+- Rust: `cargo check -p roku-controller` (Tauri crate), `cargo test -p ssdp-client` (crate tests if added).
+
+## Coding Style & Naming Conventions
+- TypeScript strict mode; prefer explicit types at boundaries.
+- Indentation: 2 spaces; avoid trailing whitespace.
+- React components: PascalCase (`RemoteControl.tsx`), hooks `useX` camelCase.
+- Tests: filename `ComponentName.test.tsx`; use Testing Library queries by role/text.
+- Rust: snake_case for functions/modules; keep commands in `src-tauri/src/commands.rs` small and async where appropriate.
+
+## Testing Guidelines
+- Framework: Vitest + Testing Library (jsdom). Setup in `vite.config.ts` and `src/setupTests.ts`.
+- Write user-centric tests (roles/labels, not implementation details).
+- Run `npm test` locally; ensure coverage does not regress for changed areas.
+- Mock Tauri APIs via existing mocks in `src/setupTests.ts`.
+
+## Commit & Pull Request Guidelines
+- Commits: short, imperative subject (“Fix test selectors”); scopes optional (e.g., `test:` seen in history). Conventional Commits welcome (`feat:`, `fix:`).
+- PRs: include description, linked issues, reproduction steps, and screenshots/gifs for UI changes.
+- Requirements: all tests pass (`npm test`), app runs (`npm run tauri dev`), and relevant docs updated (README/this file).
+
+## Security & Configuration Tips
+- Do not commit secrets. Roku ECP typically uses port 8060; SSDP uses UDP 1900.
+- For remote dev, `TAURI_DEV_HOST` in `vite.config.ts` can enable HMR over network.
+- Android build prerequisites: see `setup-env.sh` for installing CLI/SDK/NDK/JDK 17.
+

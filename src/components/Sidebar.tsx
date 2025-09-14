@@ -1,5 +1,6 @@
 import React from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import { useAppStore, RokuDevice } from '../store';
 import {
     Drawer, List, ListItemButton, ListItemText,
@@ -117,9 +118,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, scanForDevices, isS
                 <Tooltip title="About">
                     <IconButton
                         aria-label="About"
-                        onClick={() =>
-                            invoke('open_url', { url: 'https://github.com/mherold1/roku-controller' })
-                        }
+                        onClick={() => openUrl('https://github.com/mherold1/roku-controller')}
                     >
                         <InfoIcon />
                     </IconButton>

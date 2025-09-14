@@ -1,4 +1,3 @@
-import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -38,7 +37,7 @@ describe('AppLauncher', () => {
     expect(await screen.findByText('Netflix')).toBeInTheDocument();
 
     await userEvent.click(screen.getAllByRole('button', { name: /launch/i })[0]);
-    expect(invoke).toHaveBeenCalledWith('launch_roku_app', { ip: device.ip, port: device.port, appId: '1' });
+    expect(invoke).toHaveBeenCalledWith('launch_roku_app', { ip: device.ip, port: device.port, app_id: '1' });
 
     await userEvent.click(screen.getAllByLabelText(/add to favorites|remove from favorites/i)[0]);
     expect(useAppStore.getState().favoriteApps[device.ip]).toContain('1');

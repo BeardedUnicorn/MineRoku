@@ -51,7 +51,7 @@ const AppIcon: React.FC<{ device: RokuDevice; appId: string; appName: string; si
 
         const fetchIcon = async () => {
             try {
-                const iconData: string = await invoke('get_app_icon', { ip: device.ip, port: device.port, appId });
+                const iconData: string = await invoke('get_app_icon', { ip: device.ip, port: device.port, app_id: appId });
                 iconCache.set(appId, iconData);
                 setIcon(iconData);
             } catch (error) {
@@ -125,7 +125,7 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
             await invoke('launch_roku_app', {
                 ip: device.ip,
                 port: device.port,
-                appId: appId,
+                app_id: appId,
             });
             setFeedback({ message: `Launched "${appName}"`, severity: 'success' });
         } catch (error) {

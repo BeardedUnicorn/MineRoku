@@ -42,3 +42,6 @@ vi.mock('react-transition-group', () => ({
   TransitionGroup: ({ children }: { children: React.ReactNode }) => React.createElement(React.Fragment, null, children),
   CSSTransition: ({ children }: { children: React.ReactNode }) => React.createElement(React.Fragment, null, children),
 }));
+
+// Note: if Snackbar auto-hide timers cause teardown warnings, consider
+// using fake timers locally in affected tests rather than globally here.

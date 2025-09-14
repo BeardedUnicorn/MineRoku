@@ -172,7 +172,7 @@ const ActiveAppIcon: React.FC<{ device: RokuDevice; app: ActiveApp }> = ({ devic
 
         const fetchIcon = async () => {
             try {
-                const iconData: string = await invoke('get_app_icon', { ip: device.ip, port: device.port, appId: app.id });
+                const iconData: string = await invoke('get_app_icon', { ip: device.ip, port: device.port, app_id: app.id });
                 setIcon(iconData);
             } catch (error) {
                 console.error(`Error fetching icon for ${app.name}:`, error);

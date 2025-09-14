@@ -1,4 +1,3 @@
-import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { renderWithTheme } from '../testUtils';
 import RemotePopup from './RemotePopup';

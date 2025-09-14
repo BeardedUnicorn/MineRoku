@@ -1,6 +1,50 @@
+<p align="center">
+  <img src="app-logo.png" alt="Roku Controller" width="140" />
+</p>
+
 # Roku Controller
 
-A modern Tauri-based desktop application for controlling Roku devices with a beautiful Material-UI interface.
+Fast, cross‑platform desktop app for discovering and controlling Roku devices. Built with Tauri 2 (Rust backend) and React + TypeScript (frontend).
+
+<p>
+  <a href="https://tauri.app" target="_blank"><img alt="Tauri" src="https://img.shields.io/badge/Tauri-2.x-24C8DB?logo=tauri&logoColor=white"></a>
+  <a href="https://react.dev" target="_blank"><img alt="React" src="https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=white"></a>
+  <a href="https://www.rust-lang.org" target="_blank"><img alt="Rust" src="https://img.shields.io/badge/Rust-stable-000000?logo=rust&logoColor=white"></a>
+  <a href="https://www.typescriptlang.org" target="_blank"><img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white"></a>
+</p>
+
+## Overview
+
+Roku Controller makes it simple to discover Roku devices on your network, browse installed channels, and control playback with a clean, keyboard‑friendly interface. It pairs a high‑performance Rust backend (for SSDP discovery and Roku ECP calls) with a modern, Material UI‑powered React frontend.
+
+Key workflows:
+- Discover Roku devices automatically and switch between them instantly
+- Use the on‑screen remote for navigation and playback control
+- Browse installed apps in a visual grid and launch them on the device
+
+## Screenshots
+
+Composite screenshot showing remote controls, apps grid, and device sidebar:
+
+<p align="center">
+  <img src="docs/screenshots/remote.png" alt="Remote, Apps, and Device Sidebar" width="100%" />
+  
+</p>
+
+Close-ups for quick scanning:
+
+<p align="center">
+  <img src="docs/screenshots/apps.png" alt="Apps Grid (zoomed)" width="49%" />
+  <img src="docs/screenshots/devices.png" alt="Device Sidebar (zoomed)" width="49%" />
+</p>
+
+## Demo
+
+Short GIF showing navigation and launching an app:
+
+<p align="center">
+  <img src="docs/screenshots/demo.gif" alt="Roku Controller Demo" width="800" />
+</p>
 
 ## Features
 
@@ -24,7 +68,7 @@ A modern Tauri-based desktop application for controlling Roku devices with a bea
 - **XML Parsing**: Robust XML parsing for Roku API responses
 - **Error Handling**: Comprehensive error handling and user feedback
 
-## Installation & Setup
+## Quick Start
 
 ### Prerequisites
 - [Node.js](https://nodejs.org/) (v16 or higher)
@@ -58,6 +102,11 @@ A modern Tauri-based desktop application for controlling Roku devices with a bea
    npm run tauri build
    ```
 
+6. Frontend-only dev server (optional):
+   ```bash
+   npm run dev
+   ```
+
 ## Usage Guide
 
 ### Device Discovery
@@ -81,39 +130,15 @@ A modern Tauri-based desktop application for controlling Roku devices with a bea
 4. Click "Launch" on any app to open it on your Roku device
 5. Use the "Refresh" button to update the app list
 
-## API Reference
+## How It Works
 
-### Tauri Commands
+Under the hood, the app uses SSDP to discover Roku devices and the Roku External Control Protocol (ECP) over HTTP to send commands and query installed apps.
 
-The application exposes the following Tauri commands:
-
-#### `discover_roku_devices()`
-- **Purpose**: Discovers Roku devices on the network
-- **Returns**: `Vec<RokuDevice>`
-- **Usage**: Automatically called on app startup and refresh
-
-#### `list_roku_apps(ip: String, port: u16)`
-- **Purpose**: Lists all installed apps on a specific Roku device
-- **Parameters**:
-  - `ip`: Device IP address
-  - `port`: Device port (usually 8060)
-- **Returns**: `Vec<RokuApp>`
-
-#### `send_roku_command(ip: String, port: u16, command: String)`
-- **Purpose**: Sends a remote control command to a Roku device
-- **Parameters**:
-  - `ip`: Device IP address
-  - `port`: Device port
-  - `command`: Command name (e.g., "home", "play", "up", "down", etc.)
-- **Returns**: `String` (success message)
-
-#### `launch_roku_app(ip: String, port: u16, app_id: String)`
-- **Purpose**: Launches a specific app on a Roku device
-- **Parameters**:
-  - `ip`: Device IP address
-  - `port`: Device port
-  - `app_id`: Roku app ID
-- **Returns**: `String` (success message)
+Core Tauri commands (Rust):
+- `discover_roku_devices()` — Network SSDP discovery, returns devices
+- `list_roku_apps(ip, port)` — Fetch installed apps via ECP
+- `send_roku_command(ip, port, command)` — Remote/navigation and playback
+- `launch_roku_app(ip, port, app_id)` — Launch a channel/app by ID
 
 ## Project Structure
 
@@ -135,6 +160,8 @@ mine-roku/
 │   ├── Cargo.toml              # Rust dependencies
 │   └── tauri.conf.json         # Tauri configuration
 ├── public/                      # Static assets
+├── docs/
+│   └── screenshots/             # README screenshots (add your images here)
 ├── package.json                 # npm configuration
 └── README.md                   # This file
 ```
@@ -151,6 +178,10 @@ mine-roku/
 - HTTP client for Roku ECP API communication
 - XML parsing for Roku API responses
 - SSDP client for device discovery
+
+### Testing
+- Vitest + Testing Library (jsdom)
+- Run tests with coverage: `npm test`
 
 ### Adding New Features
 1. Add new Tauri commands in `src-tauri/src/commands.rs`

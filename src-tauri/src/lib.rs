@@ -6,7 +6,7 @@ pub mod commands;
 #[cfg(desktop)]
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
 #[cfg(desktop)]
-use tauri::{image::Image, AppHandle, Manager};
+use tauri::{AppHandle, Manager};
 
 use commands::{
     discover_roku_devices_impl, get_active_app_impl, get_app_icon_impl, launch_roku_app_impl,
@@ -82,8 +82,10 @@ pub fn run() {
     #[cfg(desktop)]
     let builder = builder
         .setup(|app| {
-            let icon = Image::from_bytes(include_bytes!("../../app-logo.png")).unwrap();
-            TrayIconBuilder::new().icon(icon).build(app)?;
+            // Use the default tray icon configured by Tauri; avoid deprecated
+            // Image::from_bytes (not available in Tauri v2). If a custom icon
+            // is desired, configure it via tauri.conf.json.
+            TrayIconBuilder::new().build(app)?;
             Ok(())
         })
         .on_tray_icon_event(handle_tray_event);
