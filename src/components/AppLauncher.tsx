@@ -25,6 +25,7 @@ import {
     StarBorder as StarBorderIcon,
 } from '@mui/icons-material';
 import { useAppStore, RokuDevice } from '../store';
+import { iconCache } from '../iconCache';
 
 // Updated interface: `app_type` has been removed to match the backend struct.
 interface RokuApp {
@@ -36,9 +37,6 @@ interface RokuApp {
 interface AppLauncherProps {
     device: RokuDevice;
 }
-
-// Cache to store loaded app icons and avoid refetching
-const iconCache = new Map<string, string>();
 
 const AppIcon: React.FC<{ device: RokuDevice; appId: string; appName: string; size?: number }> = ({ device, appId, appName, size = 120 }) => {
     const [icon, setIcon] = useState<string | null>(iconCache.get(appId) ?? null);

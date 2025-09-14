@@ -30,6 +30,7 @@ import {
   playbackButtonSpecs,
   powerButtonSpecs,
 } from './RemoteButtonSpecs';
+import { iconCache } from '../iconCache';
 
 export interface RokuDevice {
   name: string;
@@ -165,33 +166,52 @@ const GAP = 12;
 const DPAD_SIZE = CENTER_SIZE + ARROW_SIZE * 2 + GAP * 4;
 
 const ActiveAppIcon: React.FC<{ device: RokuDevice; app: ActiveApp }> = ({ device, app }) => {
-    const [icon, setIcon] = useState<string | null>(null);
+  const [icon, setIcon] = useState<string | null>(null);
+  const lastFetchedRef = useRef<string | null>(null);
 
-    useEffect(() => {
-        if (!app || app.id === 'roku') return;
+  useEffect(() => {
+    if (!app || app.id === 'roku') return;
 
-        const fetchIcon = async () => {
-            try {
-                const iconData: string = await invoke('get_app_icon', { ip: device.ip, port: device.port, app_id: app.id });
-                setIcon(iconData);
-            } catch (error) {
-                console.error(`Error fetching icon for ${app.name}:`, error);
-            }
-        };
+    const cacheKey = `${device.ip}-${app.id}`;
+    if (lastFetchedRef.current === cacheKey) return;
 
-        fetchIcon();
-    }, [device, app]);
+    lastFetchedRef.current = cacheKey;
 
-    if (!app || app.id === 'roku' || !icon) return null;
+    if (iconCache.has(cacheKey)) {
+      setIcon(iconCache.get(cacheKey) as string);
+      return;
+    }
 
-    return (
-        <Box
-            component="img"
-            src={icon}
-            sx={{ width: 24, height: 24, borderRadius: 1 }}
-            alt={`${app.name} icon`}
-        />
-    );
+    setIcon(null);
+
+    const fetchIcon = async () => {
+      try {
+        const iconData: string = await invoke('get_app_icon', {
+          ip: device.ip,
+          port: device.port,
+          app_id: app.id,
+        });
+        iconCache.set(cacheKey, iconData);
+        setIcon(iconData);
+      } catch (error) {
+        console.error(`Error fetching icon for ${app.name}:`, error);
+        lastFetchedRef.current = null;
+      }
+    };
+
+    fetchIcon();
+  }, [device.ip, app.id]);
+
+  if (!app || app.id === 'roku' || !icon) return null;
+
+  return (
+    <Box
+      component="img"
+      src={icon}
+      sx={{ width: 24, height: 24, borderRadius: 1 }}
+      alt={`${app.name} icon`}
+    />
+  );
 };
 
 const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
