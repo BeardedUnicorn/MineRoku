@@ -38,21 +38,44 @@ interface AppLauncherProps {
 }
 
 // Cache to store loaded app icons and avoid refetching
-const iconCache = new Map<string, string>();
+// Uses a composite key of `${ip}:${appId}` to scope icons per device
+// and includes a simple size limit to prevent unbounded growth.
+interface IconCacheEntry {
+  data: string;
+  timestamp: number;
+}
+
+const ICON_CACHE_LIMIT = 100;
+const ICON_CACHE_TTL_MS = 1000 * 60 * 60; // 1 hour
+const iconCache = new Map<string, IconCacheEntry>();
 
 const AppIcon: React.FC<{ device: RokuDevice; appId: string; appName: string; size?: number }> = ({ device, appId, appName, size = 120 }) => {
-    const [icon, setIcon] = useState<string | null>(iconCache.get(appId) ?? null);
+    const cacheKey = `${device.ip}:${appId}`;
+    const [icon, setIcon] = useState<string | null>(() => {
+        const cached = iconCache.get(cacheKey);
+        if (cached && Date.now() - cached.timestamp < ICON_CACHE_TTL_MS) {
+            return cached.data;
+        }
+        return null;
+    });
 
     useEffect(() => {
-        if (iconCache.has(appId)) {
-            setIcon(iconCache.get(appId) as string);
+        const cached = iconCache.get(cacheKey);
+        if (cached && Date.now() - cached.timestamp < ICON_CACHE_TTL_MS) {
+            setIcon(cached.data);
             return;
+        } else if (cached) {
+            iconCache.delete(cacheKey);
         }
 
         const fetchIcon = async () => {
             try {
                 const iconData: string = await invoke('get_app_icon', { ip: device.ip, port: device.port, app_id: appId });
-                iconCache.set(appId, iconData);
+                iconCache.set(cacheKey, { data: iconData, timestamp: Date.now() });
+                if (iconCache.size > ICON_CACHE_LIMIT) {
+                    const oldestKey = iconCache.keys().next().value as string;
+                    iconCache.delete(oldestKey);
+                }
                 setIcon(iconData);
             } catch (error) {
                 console.error(`Error fetching icon for ${appName}:`, error);
@@ -60,7 +83,7 @@ const AppIcon: React.FC<{ device: RokuDevice; appId: string; appName: string; si
         };
 
         fetchIcon();
-    }, [device, appId, appName]);
+    }, [device, appId, appName, cacheKey]);
 
     const sxProps = {
         height: size,
