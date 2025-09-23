@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="app-logo.png" alt="Roku Controller" width="140" />
+  <img src="app-logo.png" alt="Roku Remote" width="140" />
 </p>
 
-# Roku Controller
+# Roku Remote
 
 Fast, cross‑platform desktop app for discovering and controlling Roku devices. Built with Tauri 2 (Rust backend) and React + TypeScript (frontend).
 
@@ -15,7 +15,7 @@ Fast, cross‑platform desktop app for discovering and controlling Roku devices.
 
 ## Overview
 
-Roku Controller makes it simple to discover Roku devices on your network, browse installed channels, and control playback with a clean, keyboard‑friendly interface. It pairs a high‑performance Rust backend (for SSDP discovery and Roku ECP calls) with a modern, Material UI‑powered React frontend.
+Roku Remote makes it simple to discover Roku devices on your network, browse installed channels, and control playback with a clean, keyboard‑friendly interface. It pairs a high‑performance Rust backend (for SSDP discovery and Roku ECP calls) with a modern, Material UI‑powered React frontend.
 
 Key workflows:
 - Discover Roku devices automatically and switch between them instantly
@@ -43,7 +43,7 @@ Close-ups for quick scanning:
 Short GIF showing navigation and launching an app:
 
 <p align="center">
-  <img src="docs/screenshots/demo.gif" alt="Roku Controller Demo" width="800" />
+  <img src="docs/screenshots/demo.gif" alt="Roku Remote Demo" width="800" />
 </p>
 
 ## Features

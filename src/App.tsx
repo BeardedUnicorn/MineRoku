@@ -253,7 +253,7 @@ const App: React.FC = () => {
                             <MenuIcon />
                         </IconButton>
                         <Typography variant="h6" component="div" sx={{ flexGrow: 1, color: 'primary.main', fontWeight: 'bold' }}>
-                            {selectedDevice ? selectedDevice.name : "Roku Controller"}
+                            {selectedDevice ? selectedDevice.name : "Roku Remote"}
                         </Typography>
                     </Toolbar>
                 </AppBar>

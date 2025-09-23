@@ -145,7 +145,7 @@ export const useAppStore = create<AppState>()(
             setPreferLastUsed: (v) => set({ preferLastUsed: v }),
         }),
         {
-            name: 'roku-controller-storage', // name of the item in the storage (must be unique)
+            name: 'roku-remote-storage', // name of the item in the storage (must be unique)
             storage: createJSONStorage(() => localStorage), // (optional) by default, 'localStorage' is used
             partialize: (state) => ({ 
                 devices: state.devices, 
