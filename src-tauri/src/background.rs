@@ -42,11 +42,6 @@ pub enum BackgroundTask {
         device_ip: String,
         response: oneshot::Sender<SqliteResult<Vec<AppCache>>>,
     },
-    /// Clean old cache entries
-    CleanOldCache {
-        days_old: i64,
-        response: oneshot::Sender<SqliteResult<usize>>,
-    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -239,19 +234,6 @@ impl DatabaseManager {
         apps.collect()
     }
 
-    /// Clean cache entries older than specified days
-    fn clean_old_cache(&self, days_old: i64) -> SqliteResult<usize> {
-        let conn = self.conn.lock().unwrap();
-        let cutoff = chrono::Utc::now().timestamp() - (days_old * 86400);
-        
-        let mut count = 0;
-        
-        count += conn.execute("DELETE FROM icons WHERE cached_at < ?1", params![cutoff])?;
-        count += conn.execute("DELETE FROM apps WHERE cached_at < ?1", params![cutoff])?;
-        count += conn.execute("DELETE FROM devices WHERE last_seen < ?1", params![cutoff])?;
-        
-        Ok(count)
-    }
 }
 
 /// Initialize the background task system
@@ -326,13 +308,6 @@ pub fn init_background_tasks(db_path: String) -> Result<(), Box<dyn std::error::
                     let _ = response.send(result);
                 }
                 
-                BackgroundTask::CleanOldCache {
-                    days_old,
-                    response,
-                } => {
-                    let result = db_manager.clean_old_cache(days_old);
-                    let _ = response.send(result);
-                }
             }
         }
     });
@@ -420,14 +395,6 @@ pub async fn cache_app_list_bg(device_ip: String, apps: Vec<AppCache>) -> Result
 /// Get cached apps from the background
 pub async fn get_apps_bg(device_ip: String) -> Result<Vec<AppCache>, String> {
     execute_task(|response| BackgroundTask::GetApps { device_ip, response })
-        .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())
-}
-
-/// Clean old cache entries in the background
-pub async fn clean_old_cache_bg(days_old: i64) -> Result<usize, String> {
-    execute_task(|response| BackgroundTask::CleanOldCache { days_old, response })
         .await
         .map_err(|e| e.to_string())?
         .map_err(|e| e.to_string())
