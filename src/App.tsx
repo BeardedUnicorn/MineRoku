@@ -1,20 +1,40 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { emit, listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import Sidebar from './components/Sidebar';
 import RemoteControl from './components/RemoteControl';
 import AppLauncher from './components/AppLauncher';
 import { Box, Typography, Paper, CircularProgress, AppBar, Toolbar, IconButton, useTheme, useMediaQuery, Button } from '@mui/material';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { Tv as TvIcon, SearchOff as SearchOffIcon, Menu as MenuIcon, Refresh as RefreshIcon } from '@mui/icons-material';
 import BottomNavBar from './components/BottomNavBar';
 import './App.css';
 import { useAppStore, RokuDevice } from './store';
+import { shallow } from 'zustand/shallow';
 
 const App: React.FC = () => {
-    const { selectedDevice, addDiscoveredDevices, setSelectedDevice } = useAppStore();
+    const {
+        selectedDevice,
+        devices,
+        preferLastUsed,
+        addDiscoveredDevices,
+        setSelectedDevice,
+        upsertDevice,
+        markDeviceDisconnected,
+    } = useAppStore(
+        (s) => ({
+            selectedDevice: s.selectedDevice,
+            devices: s.devices,
+            preferLastUsed: s.preferLastUsed,
+            addDiscoveredDevices: s.addDiscoveredDevices,
+            setSelectedDevice: s.setSelectedDevice,
+            upsertDevice: s.upsertDevice,
+            markDeviceDisconnected: s.markDeviceDisconnected,
+        }),
+        shallow
+    );
     const [isSearching, setIsSearching] = useState(true);
-    const [devicesFound, setDevicesFound] = useState(true);
+    const [devicesFound, setDevicesFound] = useState(false);
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [mobileView, setMobileView] = useState<'remote' | 'apps'>('remote');
     const [isScanning, setIsScanning] = useState(false);
@@ -41,9 +61,9 @@ const App: React.FC = () => {
         };
     }, [selectedDevice]);
 
-    const handleToggleSidebar = () => {
-        setIsSidebarOpen(!isSidebarOpen);
-    };
+    const handleToggleSidebar = useCallback(() => {
+        setIsSidebarOpen((v) => !v);
+    }, []);
 
     const scanForDevices = useCallback(async () => {
         setIsScanning(true);
@@ -53,36 +73,77 @@ const App: React.FC = () => {
             addDiscoveredDevices(foundDevices);
             const anyDevicesFound = foundDevices.length > 0;
             setDevicesFound(anyDevicesFound);
-            if (selectedDevice) {
-                const stillExists = foundDevices.find((d) => d.ip === selectedDevice.ip);
-                if (stillExists) {
-                    setSelectedDevice(stillExists);
-                } else {
-                    const offline = useAppStore.getState().devices.find((d) => d.ip === selectedDevice.ip) || null;
-                    setSelectedDevice(offline);
-                }
-            } else if (anyDevicesFound) {
-                setSelectedDevice(foundDevices[0]);
-            } else {
-                setSelectedDevice(null);
+            // Do not mark devices offline or flip selection here; background events manage that.
+            // If nothing is selected and we found devices, pick the first for quick start.
+            if (!useAppStore.getState().selectedDevice && anyDevicesFound) {
+                const next = { ...foundDevices[0], status: 'connected' as RokuDevice['status'] } as RokuDevice;
+                setSelectedDevice(next);
             }
         } catch (err) {
             console.error("Discovery error:", err);
-            setDevicesFound(false);
-            setSelectedDevice(null);
+            // Keep existing devices/selection; background discovery will update when available.
         } finally {
             setIsScanning(false);
             setIsSearching(false);
         }
-    }, [selectedDevice, addDiscoveredDevices, setSelectedDevice, setIsSearching, setDevicesFound]);
+    }, [addDiscoveredDevices, setSelectedDevice]);
 
     useEffect(() => {
-        scanForDevices();
-        const intervalId = setInterval(scanForDevices, 30000);
-        return () => clearInterval(intervalId);
-    }, [scanForDevices]);
+        // Bootstrap from cached devices so the list is populated immediately.
+        (async () => {
+            try {
+                const cached: Omit<RokuDevice, 'status'>[] = await invoke('get_cached_devices');
+                if (cached && cached.length) {
+                    cached.forEach((d) => upsertDevice({ ...d, status: 'disconnected' }));
+                    if (preferLastUsed) {
+                        if (!useAppStore.getState().selectedDevice) {
+                            setSelectedDevice({ ...cached[0], status: 'disconnected' } as RokuDevice);
+                        }
+                    }
+                }
+            } catch (e) {
+                console.warn('Failed to load cached devices', e);
+            }
+        })();
 
-    const contentVariants = prefersReducedMotion
+        // Initial scan to populate quickly on first load
+        scanForDevices();
+
+        // Listen for background discovery lifecycle and device events
+        let unsubs: Array<() => void> = [];
+        const init = async () => {
+            const u1 = await listen('discovery_cycle_start', () => setIsScanning(true));
+            const u2 = await listen('discovery_cycle_end', () => setIsScanning(false));
+            const u3 = await listen<any>('device_discovered', (event) => {
+                const dev = event.payload as RokuDevice;
+                upsertDevice({ ...dev, status: 'connected' });
+                // Auto-select policy: if preferLastUsed is false, prefer first discovered.
+                const state = useAppStore.getState();
+                if (!state.selectedDevice) {
+                    if (!state.preferLastUsed) {
+                        setSelectedDevice({ ...dev, status: 'connected' });
+                    }
+                } else if (!state.preferLastUsed && state.selectedDevice.status === 'disconnected') {
+                    // Only switch if different IP or the selected device remains offline
+                    if (state.selectedDevice.ip !== dev.ip) {
+                        setSelectedDevice({ ...dev, status: 'connected' });
+                    }
+                }
+            });
+            const u4 = await listen<string>('device_lost', (event) => {
+                const ip = event.payload as unknown as string;
+                markDeviceDisconnected(ip);
+                // If the selected device went offline, keep it selected but marked as disconnected
+            });
+            unsubs = [u1, u2, u3, u4];
+        };
+        init();
+        return () => {
+            unsubs.forEach((u) => u && u());
+        };
+    }, [scanForDevices, upsertDevice, markDeviceDisconnected, setSelectedDevice]);
+
+    const contentVariants = useMemo(() => prefersReducedMotion
         ? {
             hidden: { opacity: 1, y: 0 },
             visible: { opacity: 1, y: 0 },
@@ -92,10 +153,39 @@ const App: React.FC = () => {
             hidden: { opacity: 0, y: 20 },
             visible: { opacity: 1, y: 0, transition: { duration: 0.4 } },
             exit: { opacity: 0, y: -20, transition: { duration: 0.3 } },
-        };
+        }, [prefersReducedMotion]);
 
-    const MainContentComponent: React.FC = () => {
-        if (isSearching) {
+    const mainContent = useMemo(() => {
+        if (selectedDevice) {
+            return (
+                <motion.div
+                    key={selectedDevice.ip}
+                    initial="hidden"
+                    animate="visible"
+                    exit="exit"
+                    variants={contentVariants}
+                    style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}
+                >
+                    {isMobile ? (
+                        <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 1 }}>
+                            {mobileView === 'remote' && <RemoteControl device={selectedDevice} />}
+                            {mobileView === 'apps' && <AppLauncher device={selectedDevice} />}
+                        </Box>
+                    ) : (
+                        <Box sx={{ display: 'flex', flexDirection: 'row', gap: 4, flex: 1, overflow: 'hidden' }}>
+                            <Box sx={{ width: 320, flexShrink: 0, mx: 'auto', display: 'flex', justifyContent: 'center', alignItems: 'flex-start' }}>
+                                <RemoteControl device={selectedDevice} />
+                            </Box>
+                            <Box sx={{ flexGrow: 1, minWidth: 0, overflowY: 'auto', pr: 2 }}>
+                               <AppLauncher device={selectedDevice} />
+                            </Box>
+                        </Box>
+                    )}
+                </motion.div>
+            );
+        }
+        const hasAnyDevices = devices.length > 0 || devicesFound;
+        if (isSearching && !hasAnyDevices) {
             return (
                 <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 2 }}>
                     <CircularProgress />
@@ -105,8 +195,7 @@ const App: React.FC = () => {
                 </Box>
             );
         }
-
-        if (!devicesFound) {
+        if (!hasAnyDevices) {
             return (
                 <Paper sx={{ p: 4, textAlign: 'center', backgroundColor: 'background.paper', borderRadius: 4, maxWidth: 450, mx: 'auto' }}>
                     <SearchOffIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
@@ -125,38 +214,6 @@ const App: React.FC = () => {
                 </Paper>
             );
         }
-
-        if (selectedDevice) {
-            return (
-                <motion.div
-                    key={selectedDevice.ip}
-                    initial="hidden"
-                    animate="visible"
-                    exit="exit"
-                    variants={contentVariants}
-                    style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}
-                >
-                    {isMobile ? (
-                        // On mobile, the content is one of two views.
-                        <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 1 }}>
-                            {mobileView === 'remote' && <RemoteControl device={selectedDevice} />}
-                            {mobileView === 'apps' && <AppLauncher device={selectedDevice} />}
-                        </Box>
-                    ) : (
-                        // On desktop, we show both side-by-side.
-                        <Box sx={{ display: 'flex', flexDirection: 'row', gap: 4, flex: 1, overflow: 'hidden' }}>
-                            <Box sx={{ width: 320, flexShrink: 0, mx: 'auto', display: 'flex', justifyContent: 'center', alignItems: 'flex-start' }}>
-                                <RemoteControl device={selectedDevice} />
-                            </Box>
-                            <Box sx={{ flexGrow: 1, minWidth: 0, overflowY: 'auto', pr: 2 }}>
-                               <AppLauncher device={selectedDevice} />
-                            </Box>
-                        </Box>
-                    )}
-                </motion.div>
-            );
-        }
-
         return (
             <Paper sx={{ p: 4, textAlign: 'center', backgroundColor: 'background.paper', borderRadius: 4, maxWidth: 450, mx: 'auto' }}>
                 <TvIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
@@ -165,7 +222,7 @@ const App: React.FC = () => {
                 </Typography>
             </Paper>
         );
-    };
+    }, [selectedDevice, isMobile, mobileView, contentVariants, devices.length, devicesFound, isSearching, scanForDevices]);
 
     return (
         <Box className="app-container">
@@ -177,7 +234,7 @@ const App: React.FC = () => {
                     isScanning={isScanning}
                 />
             </Box>
-            <Box sx={{ display: 'flex', flexDirection: 'column', flexGrow: 1, height: '100vh', overflow: 'hidden' }}>
+            <Box sx={{ display: 'flex', flexDirection: 'column', flexGrow: 1, height: '100dvh', overflow: 'hidden' }}>
                 <AppBar position="static" color="transparent" elevation={0} sx={{
                     borderBottom: `1px solid ${theme.palette.divider}`,
                     display: 'flex',
@@ -202,11 +259,9 @@ const App: React.FC = () => {
                 </AppBar>
 
                 <Box component="main" className={`main-content ${isMobile && selectedDevice ? 'main-content-mobile' : ''}`}>
-                    <AnimatePresence mode="wait">
-                        <Box sx={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', flexGrow: 1, width: '100%' }}>
-                            <MainContentComponent />
-                        </Box>
-                    </AnimatePresence>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', flexGrow: 1, width: '100%' }}>
+                        {mainContent}
+                    </Box>
                 </Box>
 
                 {isMobile && selectedDevice && (

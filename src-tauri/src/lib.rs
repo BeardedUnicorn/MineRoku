@@ -2,11 +2,13 @@
 
 // Make all functions and structs public
 pub mod commands;
+mod background;
 
 #[cfg(desktop)]
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
 #[cfg(desktop)]
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
+use tauri::Manager;
 
 use commands::{
     discover_roku_devices_impl, get_active_app_impl, get_app_icon_impl, launch_roku_app_impl,
@@ -16,6 +18,9 @@ use commands::{
 
 use tauri::command;
 use tauri_plugin_opener::init as opener;
+mod background_discovery;
+use background_discovery::start_background_discovery;
+use background::init_background_tasks;
 
 #[command]
 async fn discover_roku_devices() -> Result<Vec<RokuDevice>, String> {
@@ -76,12 +81,28 @@ pub fn run() {
             launch_roku_app,
             get_active_app,
             get_app_icon,
-            open_popup_window
+            open_popup_window,
+            get_cached_devices,
+            get_cached_apps
         ]);
 
     #[cfg(desktop)]
     let builder = builder
         .setup(|app| {
+            // Initialize lightweight SQLite cache for devices/apps
+            // Prefer a per-app data dir; fall back to current dir if unavailable.
+            let db_path = app
+                .path()
+                .app_data_dir()
+                .map(|p| p.join("roku_cache.db"))
+                .unwrap_or_else(|_| std::path::PathBuf::from("roku_cache.db"));
+            if let Some(parent) = db_path.parent() { let _ = std::fs::create_dir_all(parent); }
+            if let Err(e) = init_background_tasks(db_path.to_string_lossy().to_string()) {
+                eprintln!("Failed to init cache DB: {}", e);
+            }
+
+            // Start background device discovery and emit events to all windows.
+            start_background_discovery(app.app_handle().clone());
             // Use the default tray icon configured by Tauri; avoid deprecated
             // Image::from_bytes (not available in Tauri v2). If a custom icon
             // is desired, configure it via tauri.conf.json.
@@ -89,6 +110,40 @@ pub fn run() {
             Ok(())
         })
         .on_tray_icon_event(handle_tray_event);
+
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    let builder = builder.setup(|app| {
+        // Initialize cache on mobile and start discovery.
+        let db_path = app
+            .path()
+            .app_data_dir()
+            .map(|p| p.join("roku_cache.db"))
+            .unwrap_or_else(|_| std::path::PathBuf::from("roku_cache.db"));
+        if let Some(parent) = db_path.parent() { let _ = std::fs::create_dir_all(parent); }
+        if let Err(e) = init_background_tasks(db_path.to_string_lossy().to_string()) {
+            eprintln!("Failed to init cache DB: {}", e);
+        }
+        start_background_discovery(app.app_handle().clone());
+        Ok(())
+    });
+
+#[tauri::command]
+async fn get_cached_devices() -> Result<Vec<RokuDevice>, String> {
+    let cached = background::get_devices_bg().await?;
+    Ok(cached
+        .into_iter()
+        .map(|d| RokuDevice { name: d.name, ip: d.ip, port: d.port, url: d.url })
+        .collect())
+}
+
+#[tauri::command]
+async fn get_cached_apps(ip: String) -> Result<Vec<RokuApp>, String> {
+    let cached = background::get_apps_bg(ip).await?;
+    Ok(cached
+        .into_iter()
+        .map(|a| RokuApp { id: a.id, name: a.name, version: a.version })
+        .collect())
+}
 
     builder
         .run(tauri::generate_context!())

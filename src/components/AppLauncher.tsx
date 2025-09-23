@@ -63,7 +63,7 @@ const AppIcon: React.FC<{ device: RokuDevice; appId: string; appName: string; si
 
         const fetchIcon = async () => {
             try {
-                const iconData: string = await invoke('get_app_icon', { ip: device.ip, port: device.port, app_id: appId });
+                const iconData: string = await invoke('get_app_icon', { ip: device.ip, port: device.port, appId });
                 iconCache.set(cacheKey, { data: iconData, timestamp: Date.now() });
                 if (iconCache.size > ICON_CACHE_LIMIT) {
                     const oldestKey = iconCache.keys().next().value as string;
@@ -76,7 +76,7 @@ const AppIcon: React.FC<{ device: RokuDevice; appId: string; appName: string; si
         };
 
         fetchIcon();
-    }, [device, appId, appName, cacheKey]);
+    }, [device.ip, device.port, appId]);
 
     const sxProps = {
         height: size,
@@ -120,6 +120,11 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
         setIsLoading(true);
         setCurrentPage(1);
         try {
+            if (device.status && device.status !== 'connected') {
+                // When offline, rely on cached apps loaded in useEffect.
+                setIsLoading(false);
+                return;
+            }
             const rokuApps: RokuApp[] = await invoke('list_roku_apps', {
                 ip: device.ip,
                 port: device.port,
@@ -136,6 +141,10 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
     };
 
     const launchApp = async (appId: string, appName: string) => {
+        if (device.status && device.status !== 'connected') {
+            setFeedback({ message: 'Device appears offline', severity: 'error' });
+            return;
+        }
         setIsLaunching(appId);
         try {
             await invoke('launch_roku_app', {
@@ -159,7 +168,24 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
     }, [searchTerm]);
 
     useEffect(() => {
-        if (device) {
+        if (!device) return;
+
+        // 1) Load cached apps immediately for fast UI
+        (async () => {
+            try {
+                const cached: RokuApp[] = await invoke('get_cached_apps', { ip: device.ip });
+                if (cached && cached.length) {
+                    setApps(cached.sort((a, b) => a.name.localeCompare(b.name)));
+                } else {
+                    setApps([]);
+                }
+            } catch (e) {
+                // Non-fatal; fall back to live fetch below
+            }
+        })();
+
+        // 2) Fetch live apps only when device is connected; replaces cached results and persists
+        if (!device.status || device.status === 'connected') {
             fetchApps();
         }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -310,4 +336,11 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
     );
 };
 
-export default AppLauncher;
+// Avoid re-render when the same device endpoint is passed with identical fields
+export default React.memo(AppLauncher, (prev, next) => (
+  prev.device.ip === next.device.ip &&
+  prev.device.port === next.device.port &&
+  prev.device.name === next.device.name &&
+  prev.device.url === next.device.url &&
+  prev.device.status === next.device.status
+));

@@ -5,14 +5,21 @@ use futures_util::stream::StreamExt;
 use once_cell::sync::Lazy;
 use reqwest::Client;
 use roku::{Device, Key};
+use crate::background::{cache_app_list_bg, AppCache as CacheApp, get_icon_bg, cache_icon_bg};
 use serde::{Deserialize, Serialize};
 use ssdp_client::{search, SearchTarget};
-use std::{collections::HashMap, sync::Mutex, time::Duration};
+use std::{collections::{HashMap, HashSet}, sync::Mutex, time::Duration};
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 use url::Url;
 
 /// Shared HTTP client for discovery and manual requests.
-static HTTP_CLIENT: Lazy<Client> = Lazy::new(Client::new);
+static HTTP_CLIENT: Lazy<Client> = Lazy::new(|| {
+    Client::builder()
+        .timeout(Duration::from_secs(5))
+        .connect_timeout(Duration::from_secs(3))
+        .build()
+        .unwrap_or_else(|_| Client::new())
+});
 
 /// Basic in-memory cache for app icons.
 static ICON_CACHE: Lazy<Mutex<HashMap<String, String>>> = Lazy::new(|| Mutex::new(HashMap::new()));
@@ -45,11 +52,14 @@ pub async fn discover_roku_devices_impl() -> Result<Vec<RokuDevice>, String> {
         .await
         .map_err(|e| e.to_string())?;
     let mut out = Vec::new();
+    let mut seen_usn: HashSet<String> = HashSet::new();
     while let Some(resp_res) = responses.next().await {
         let resp = match resp_res {
             Ok(r) if r.search_target() == &search_target => r,
             _ => continue,
         };
+        let usn = resp.usn().to_string();
+        if !seen_usn.insert(usn) { continue; }
         let desc_url = match Url::parse(resp.location()) {
             Ok(u) => u,
             Err(e) => {
@@ -104,7 +114,7 @@ pub async fn list_roku_apps_impl(ip: String, port: u16) -> Result<Vec<RokuApp>, 
 
     // We use `filter_map` to iterate, ensuring we only include apps that have an ID,
     // as it is essential for launching and fetching icons.
-    let apps = apps_from_crate
+    let apps: Vec<RokuApp> = apps_from_crate
         .apps
         .into_iter()
         .filter_map(|app| {
@@ -117,6 +127,13 @@ pub async fn list_roku_apps_impl(ip: String, port: u16) -> Result<Vec<RokuApp>, 
             })
         })
         .collect();
+
+    // Persist to cache in the background database.
+    let cache_list: Vec<CacheApp> = apps
+        .iter()
+        .map(|a| CacheApp { id: a.id.clone(), name: a.name.clone(), version: a.version.clone() })
+        .collect();
+    let _ = cache_app_list_bg(ip.clone(), cache_list).await;
 
     Ok(apps)
 }
@@ -206,11 +223,18 @@ pub async fn get_active_app_impl(ip: String, port: u16) -> Result<ActiveAppInfo,
 pub async fn get_app_icon_impl(ip: String, port: u16, app_id: String) -> Result<String, String> {
     let url = format!("http://{}:{}/query/icon/{}", ip, port, app_id);
 
-    // Return cached icon if we've fetched it before.
+    // 1) In-memory cache
     if let Some(cached) = { ICON_CACHE.lock().unwrap().get(&url).cloned() } {
         return Ok(cached);
     }
 
+    // 2) Persistent cache (SQLite)
+    if let Ok(Some(db_icon)) = get_icon_bg(ip.clone(), app_id.clone()).await {
+        ICON_CACHE.lock().unwrap().insert(url.clone(), db_icon.clone());
+        return Ok(db_icon);
+    }
+
+    // 3) Live fetch and persist
     let response = HTTP_CLIENT
         .get(&url)
         .send()
@@ -226,6 +250,7 @@ pub async fn get_app_icon_impl(ip: String, port: u16, app_id: String) -> Result<
     let mime_type = "image/png"; // Assuming PNG, Roku uses PNG for icons
     let data_url = format!("data:{};base64,{}", mime_type, base64_icon);
 
+    let _ = cache_icon_bg(ip, app_id, data_url.clone()).await;
     ICON_CACHE.lock().unwrap().insert(url, data_url.clone());
 
     Ok(data_url)
@@ -240,6 +265,10 @@ pub fn open_popup_window_impl(app: &AppHandle) -> Result<(), String> {
         {
             window.show().map_err(|e| e.to_string())?;
             window.set_focus().map_err(|e| e.to_string())?;
+        }
+        #[cfg(any(target_os = "android", target_os = "ios"))]
+        {
+            let _ = window;
         }
     } else {
         #[cfg(not(any(target_os = "android", target_os = "ios")))]

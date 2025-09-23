@@ -37,6 +37,7 @@ export interface RokuDevice {
   ip: string;
   port: number;
   url: string;
+  status?: 'connected' | 'connecting' | 'disconnected';
 }
 
 interface ActiveApp {
@@ -191,7 +192,7 @@ const ActiveAppIcon: React.FC<{ device: RokuDevice; app: ActiveApp }> = ({ devic
 
             setIcon(null);
             try {
-                const iconData: string = await invoke('get_app_icon', { ip: device.ip, port: device.port, app_id: app.id });
+                const iconData: string = await invoke('get_app_icon', { ip: device.ip, port: device.port, appId: app.id });
                 iconCache.set(cacheKey, { data: iconData, timestamp: Date.now() });
                 if (iconCache.size > ICON_CACHE_LIMIT) {
                     const oldestKey = iconCache.keys().next().value as string;
@@ -224,14 +225,22 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
   const [feedback, setFeedback] = useState<FeedbackState>(null);
   const [activeApp, setActiveApp] = useState<ActiveApp | null>(null);
   const [isAppLoading, setIsAppLoading] = useState<boolean>(true);
+  const hasLoadedRef = useRef(false);
+  const lastDeviceKeyRef = useRef<string | null>(null);
   const busyRef = useRef<Set<string>>(new Set());
   const mountedRef = useRef(true);
   const [currentPlatform, setCurrentPlatform] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchPlatform = async () => {
-      const p = await platform();
-      setCurrentPlatform(p);
+      try {
+        const p = await platform();
+        setCurrentPlatform(p);
+      } catch {
+        // If permission is not granted (e.g., in popup window) or plugin unavailable,
+        // fall back gracefully without breaking the UI.
+        setCurrentPlatform(null);
+      }
     };
     fetchPlatform();
     return () => {
@@ -241,16 +250,36 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
 
   useEffect(() => {
     if (!device) return;
+    const currentKey = `${device.ip}:${device.port}`;
+
+    // Avoid re-triggering the loading spinner if the same device is re-selected with identical endpoint.
+    const isSameDevice = lastDeviceKeyRef.current === currentKey;
+    lastDeviceKeyRef.current = currentKey;
 
     const initialFetch = async () => {
-      setIsAppLoading(true);
+      if (!isSameDevice) {
+        setIsAppLoading(true);
+      } else if (hasLoadedRef.current) {
+        // Already loaded for this device; don't flip the spinner again.
+        setIsAppLoading(false);
+      }
+
+      // Fallback in case backend takes too long; cleared on success/failure.
+      const timeoutId = window.setTimeout(() => {
+        if (mountedRef.current) setIsAppLoading(false);
+      }, 6500);
       try {
+        if (device.status && device.status !== 'connected') {
+          setActiveApp(null);
+          return;
+        }
         const appInfo: ActiveApp = await invoke('get_active_app', {
           ip: device.ip,
           port: device.port,
         });
         if (mountedRef.current) {
           setActiveApp(appInfo);
+          hasLoadedRef.current = true;
         }
       } catch (error) {
         console.error('Could not fetch active app on initial load:', error);
@@ -258,6 +287,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
           setActiveApp(null);
         }
       } finally {
+        clearTimeout(timeoutId);
         if (mountedRef.current) {
           setIsAppLoading(false);
         }
@@ -265,7 +295,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
     };
 
     initialFetch();
-  }, [device]);
+  }, [device.ip, device.port, device.status]);
 
   useEffect(() => {
     if (!device) return;
@@ -273,6 +303,9 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
     let intervalId: number | undefined;
 
     const fetchActiveApp = async () => {
+      if (device.status && device.status !== 'connected') {
+        return;
+      }
       try {
         const appInfo: ActiveApp = await invoke('get_active_app', {
           ip: device.ip,
@@ -280,7 +313,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
         });
         if (mountedRef.current) setActiveApp(appInfo);
       } catch (error) {
-        console.error("Could not fetch active app during polling:", error);
+        // Avoid spamming logs when device briefly unreachable; ignore here.
       }
     };
 
@@ -320,6 +353,10 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
   const sendCommand = useCallback(
     async (command: string) => {
       if (!device) return;
+      if (device.status && device.status !== 'connected') {
+        setFeedback({ message: 'Device appears offline', severity: 'error' });
+        return;
+      }
       if (busyRef.current.has(command)) return;
       busyRef.current.add(command);
       try {
@@ -344,7 +381,18 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
   );
 
   useEffect(() => {
+    const isEditableTarget = (target: EventTarget | null) => {
+      const el = target as HTMLElement | null;
+      if (!el) return false;
+      const tag = el.tagName?.toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || el.isContentEditable) return true;
+      if (el.getAttribute?.('role') === 'textbox') return true;
+      return false;
+    };
+
     const handler = (e: KeyboardEvent) => {
+      // Do not intercept keys while typing in inputs/text areas.
+      if (isEditableTarget(e.target)) return;
       const key = e.key.toLowerCase();
       switch (key) {
         case 'arrowup':
@@ -435,6 +483,21 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
       >
         Roku Remote
       </Typography>
+
+      {device.status && device.status !== 'connected' && (
+        <Box sx={{
+          width: '100%',
+          bgcolor: 'warning.light',
+          color: 'warning.contrastText',
+          borderRadius: 1,
+          mb: 1,
+          p: 1,
+          textAlign: 'center',
+          fontWeight: 500,
+        }}>
+          Device offline — waiting for discovery
+        </Box>
+      )}
 
       <Box sx={{
         display: 'flex',
@@ -574,4 +637,14 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
   );
 };
 
-export default RemoteControl;
+function devicesEqual(a: RokuDevice, b: RokuDevice) {
+  return (
+    a.ip === b.ip &&
+    a.port === b.port &&
+    a.name === b.name &&
+    a.url === b.url &&
+    a.status === b.status
+  );
+}
+
+export default React.memo(RemoteControl, (prev, next) => devicesEqual(prev.device, next.device));

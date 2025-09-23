@@ -32,9 +32,9 @@
 - Commits: short, imperative subject (“Fix test selectors”); scopes optional (e.g., `test:` seen in history). Conventional Commits welcome (`feat:`, `fix:`).
 - PRs: include description, linked issues, reproduction steps, and screenshots/gifs for UI changes.
 - Requirements: all tests pass (`npm test`), app runs (`npm run tauri dev`), and relevant docs updated (README/this file).
+- After finishing your assigned work, commit your changes to git before you sign off.
 
 ## Security & Configuration Tips
 - Do not commit secrets. Roku ECP typically uses port 8060; SSDP uses UDP 1900.
 - For remote dev, `TAURI_DEV_HOST` in `vite.config.ts` can enable HMR over network.
 - Android build prerequisites: see `setup-env.sh` for installing CLI/SDK/NDK/JDK 17.
-

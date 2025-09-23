@@ -31,10 +31,12 @@ pub struct Device {
 
 impl Device {
     pub fn new(url: Url) -> Device {
-        Device {
-            url,
-            client: Client::new(),
-        }
+        let client = Client::builder()
+            .timeout(Duration::from_secs(5))
+            .connect_timeout(Duration::from_secs(3))
+            .build()
+            .unwrap_or_else(|_| Client::new());
+        Device { url, client }
     }
 
     pub async fn discover() -> Result<Vec<Device>> {

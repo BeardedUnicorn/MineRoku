@@ -31,4 +31,4 @@ const BottomNavBar: React.FC<BottomNavBarProps> = ({ view, setView }) => {
     );
 };
 
-export default BottomNavBar;
+export default React.memo(BottomNavBar, (prev, next) => prev.view === next.view && prev.setView === next.setView);

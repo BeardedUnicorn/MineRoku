@@ -2,9 +2,11 @@ import React from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { useAppStore, RokuDevice } from '../store';
+import { shallow } from 'zustand/shallow';
 import {
     Drawer, List, ListItemButton, ListItemText,
-    Typography, Box, IconButton, Divider, CircularProgress, Tooltip, useTheme, useMediaQuery
+    Typography, Box, IconButton, Divider, CircularProgress, Tooltip, useTheme, useMediaQuery,
+    Dialog, DialogTitle, DialogContent, FormControlLabel, Switch
 } from '@mui/material';
 import {
     Refresh as RefreshIcon,
@@ -21,9 +23,16 @@ interface SidebarProps {
 }
 
 const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, scanForDevices, isScanning }) => {
-    const { devices, selectedDevice, setSelectedDevice } = useAppStore();
+    const { devices, selectedDevice } = useAppStore(
+        (s) => ({ devices: s.devices, selectedDevice: s.selectedDevice }),
+        shallow
+    );
+    const setSelectedDevice = useAppStore((s) => s.setSelectedDevice);
+    const preferLastUsed = useAppStore((s) => s.preferLastUsed);
+    const setPreferLastUsed = useAppStore((s) => s.setPreferLastUsed);
     const theme = useTheme();
     const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+    const [settingsOpen, setSettingsOpen] = React.useState(false);
 
     const handleDeviceSelect = (device: RokuDevice) => {
         setSelectedDevice(device);
@@ -39,6 +48,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, scanForDevices, isS
     const drawerWidth = 280;
 
     return (
+        <>
         <Drawer
             variant={isMobile ? 'temporary' : 'permanent'}
             open={isOpen}
@@ -63,23 +73,36 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, scanForDevices, isS
                 backgroundColor: 'background.default',
                 height: '64px' // Match AppBar height
             }}>
-                <Typography variant="h6" sx={{ ml: 1, color: 'text.primary' }}>Roku Devices</Typography>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, ml: 1 }}>
+                    <Typography variant="h6" sx={{ color: 'text.primary' }}>Roku Devices</Typography>
+                    {isScanning && <CircularProgress size={16} />}
+                </Box>
             </Box>
             <Divider />
             <Box sx={{ flexGrow: 1, overflowY: 'auto' }}>
                 <List>
-                    {isScanning ? (
-                        <Box sx={{ display: 'flex', justifyContent: 'center', p: 2 }}><CircularProgress /></Box>
-                    ) : (
-                        devices.map((device: RokuDevice) => (
-                            <ListItemButton
-                                key={device.ip}
-                                selected={selectedDevice?.ip === device.ip}
-                                onClick={() => handleDeviceSelect(device)}
-                            >
-                                <ListItemText primary={device.name} secondary={device.ip} />
-                            </ListItemButton>
-                        ))
+                    {devices.map((device: RokuDevice) => (
+                        <ListItemButton
+                            key={device.ip}
+                            selected={selectedDevice?.ip === device.ip}
+                            onClick={() => handleDeviceSelect(device)}
+                        >
+                            <ListItemText primary={device.name} secondary={device.ip} />
+                            <Box
+                                aria-label={device.status === 'connected' ? 'Device online' : 'Device offline'}
+                                sx={{
+                                    width: 10,
+                                    height: 10,
+                                    borderRadius: '50%',
+                                    bgcolor: device.status === 'connected' ? 'success.main' : 'text.disabled',
+                                }}
+                            />
+                        </ListItemButton>
+                    ))}
+                    {!devices.length && (
+                        <Typography variant="body2" color="text.secondary" sx={{ p: 2 }}>
+                            {isScanning ? 'Scanning for devices…' : 'No devices discovered yet.'}
+                        </Typography>
                     )}
                 </List>
             </Box>
@@ -105,15 +128,12 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, scanForDevices, isS
                     </IconButton>
                 </Tooltip>
                 <Tooltip title="Settings">
-                    <span>
-                        <IconButton
-                            aria-label="Settings"
-                            onClick={() => { /* Add settings logic */ }}
-                            disabled
-                        >
-                            <SettingsIcon />
-                        </IconButton>
-                    </span>
+                    <IconButton
+                        aria-label="Settings"
+                        onClick={() => setSettingsOpen(true)}
+                    >
+                        <SettingsIcon />
+                    </IconButton>
                 </Tooltip>
                 <Tooltip title="About">
                     <IconButton
@@ -125,7 +145,17 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, scanForDevices, isS
                 </Tooltip>
             </Box>
         </Drawer>
+        <Dialog open={settingsOpen} onClose={() => setSettingsOpen(false)}>
+            <DialogTitle>Settings</DialogTitle>
+            <DialogContent>
+                <FormControlLabel
+                    control={<Switch checked={preferLastUsed} onChange={(e) => setPreferLastUsed(e.target.checked)} />}
+                    label="Prefer last-used device on startup"
+                />
+            </DialogContent>
+        </Dialog>
+        </>
     );
 };
 
-export default Sidebar;
+export default React.memo(Sidebar);
