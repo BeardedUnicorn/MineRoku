@@ -10,9 +10,16 @@ export default defineConfig(async () => ({
   plugins: [react()],
 
   build: {
+    chunkSizeWarningLimit: 900,
     rollupOptions: {
       input: {
         main: resolve(__dirname, 'index.html'),
+      },
+      output: {
+        manualChunks: {
+          react: ['react', 'react-dom'],
+          mui: ['@mui/material', '@mui/icons-material', '@emotion/react', '@emotion/styled'],
+        },
       },
     },
   },

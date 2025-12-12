@@ -1,4 +1,4 @@
-package com.roku_controller.app
+package com.rokucontroller.remote
 
 import android.content.Context
 import android.net.wifi.WifiManager
@@ -86,6 +86,7 @@ class MainActivity : TauriActivity() {
         }
     }
 
+    @Suppress("DEPRECATION")
     private fun acquireLocks() {
         try {
             val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager

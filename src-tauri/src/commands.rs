@@ -5,7 +5,9 @@ use roku::Device;
 use crate::{background::{cache_app_list_bg, AppCache as CacheApp, get_icon_bg, cache_icon_bg}, background_discovery::run_discovery_once};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, sync::Mutex, time::Duration};
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::AppHandle;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 use url::Url;
 
 /// Shared HTTP client for discovery and manual requests.
@@ -126,8 +128,8 @@ pub async fn get_media_player_impl(ip: String, port: u16) -> Result<MediaPlayerI
                 runtime: media_player.runtime,
             })
         }
-        Err(e) => {            
-            // Let's try a simple manual parse as a fallback
+        Err(err) => {            
+            log::warn!("Roku crate media-player parsing failed: {}", err);
             log::info!("Attempting manual XML parsing as fallback");
             parse_media_player_simple(&body)
         }

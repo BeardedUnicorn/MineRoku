@@ -1,5 +1,6 @@
-import java.util.Properties
 import java.io.FileInputStream
+import java.util.Properties
+import org.gradle.api.JavaVersion
 
 plugins {
     id("com.android.application")
@@ -17,12 +18,12 @@ val tauriProperties = Properties().apply {
 
 android {
     compileSdk = 34
-    namespace = "com.roku_controller.app"
+    namespace = "com.rokucontroller.remote"
 
     defaultConfig {
         manifestPlaceholders["usesCleartextTraffic"] = "false"
-        applicationId = "com.roku_controller.app"
-        minSdkVersion(24)
+        applicationId = "com.rokucontroller.remote"
+        minSdk = 24
         targetSdk = 34
         versionCode = tauriProperties
             .getProperty("tauri.android.versionCode", "1")
@@ -71,8 +72,13 @@ android {
         }
     }
 
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
     kotlinOptions {
-        jvmTarget = "1.8"
+        jvmTarget = "17"
     }
 
     buildFeatures {

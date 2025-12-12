@@ -1,4 +1,4 @@
-/src/main/java/com/roku_controller/app/generated
+/src/main/java/com/rokucontroller/remote/generated
 /src/main/jniLibs/**/*.so
 /src/main/assets/tauri.conf.json
 /proguard-tauri.pro
