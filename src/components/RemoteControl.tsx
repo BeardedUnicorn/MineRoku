@@ -15,6 +15,7 @@ import {
   Stack,
   Divider,
   CircularProgress,
+  LinearProgress,
 } from '@mui/material';
 import { motion, useReducedMotion } from 'framer-motion';
 import {
@@ -44,6 +45,28 @@ export interface RokuDevice {
 interface ActiveApp {
   name: string;
   id: string;
+}
+
+interface MediaPlayerInfo {
+  state: string;
+  error: boolean;
+  plugin?: {
+    id: string;
+    name: string;
+    bandwidth: string;
+  };
+  format?: {
+    audio: string;
+    captions: string;
+    container: string;
+    drm: string;
+    video: string;
+    video_res: string;
+  };
+  position?: string;
+  duration?: string;
+  is_live?: boolean;
+  runtime?: string;
 }
 
 interface RemoteControlProps {
@@ -226,13 +249,13 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
   const [feedback, setFeedback] = useState<FeedbackState>(null);
   const [activeApp, setActiveApp] = useState<ActiveApp | null>(null);
   const [isAppLoading, setIsAppLoading] = useState<boolean>(true);
+  const [mediaInfo, setMediaInfo] = useState<MediaPlayerInfo | null>(null);
+  const [mediaModalOpen, setMediaModalOpen] = useState(false);
   const hasLoadedRef = useRef(false);
   const lastDeviceKeyRef = useRef<string | null>(null);
   const busyRef = useRef<Set<string>>(new Set());
   const abortControllerRef = useRef<AbortController | null>(null);
   const [currentPlatform, setCurrentPlatform] = useState<string | null>(null);
-  const [mediaModalOpen, setMediaModalOpen] = useState(false);
-
 
   useEffect(() => {
     const fetchPlatform = async () => {
@@ -247,6 +270,25 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
     };
     fetchPlatform();
   }, []);
+
+  // Helper functions for time parsing and formatting
+  const parseTime = (timeStr?: string): number => {
+    if (!timeStr) return 0;
+    const match = timeStr.match(/(\d+)/);
+    return match ? parseInt(match[1], 10) : 0;
+  };
+
+  const formatTime = (ms: number): string => {
+    const totalSeconds = Math.floor(ms / 1000);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+
+    if (hours > 0) {
+      return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    }
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  };
 
   useEffect(() => {
     if (!device) return;
@@ -279,6 +321,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
       try {
         if (device.status && device.status !== 'connected') {
           setActiveApp(null);
+          setMediaInfo(null);
           return;
         }
         
@@ -344,10 +387,32 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
       }
     };
 
+    const fetchMediaInfo = async () => {
+      if (device.status && device.status !== 'connected') {
+        setMediaInfo(null);
+        return;
+      }
+      try {
+        const info: MediaPlayerInfo = await invoke('get_media_player', {
+          ip: device.ip,
+          port: device.port
+        });
+        setMediaInfo(info);
+      } catch (error) {
+        // Media player info might not be available when not playing content
+        // This is expected, so we don't log errors
+        setMediaInfo(null);
+      }
+    };
+
+    const fetchAll = async () => {
+      await Promise.all([fetchActiveApp(), fetchMediaInfo()]);
+    };
+
     const startPolling = () => {
       if (intervalId) return;
-      fetchActiveApp();
-      intervalId = window.setInterval(fetchActiveApp, 5000);
+      fetchAll();
+      intervalId = window.setInterval(fetchAll, 2000); // Poll every 2 seconds for smoother progress updates
     };
 
     const stopPolling = () => {
@@ -482,6 +547,13 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
   const playbackButtons = useMemo<CommandSpec[]>(() => playbackButtonSpecs, []);
   const powerButtons = useMemo<CommandSpec[]>(() => powerButtonSpecs, []);
 
+  // Calculate progress for the progress bar
+  const position = parseTime(mediaInfo?.position);
+  const duration = parseTime(mediaInfo?.duration);
+  const progress = duration > 0 ? (position / duration) * 100 : 0;
+  const isPlaying = mediaInfo && mediaInfo.state === 'play' && !mediaInfo.error;
+  const showProgress = mediaInfo && !mediaInfo.is_live && duration > 0 && (mediaInfo.state === 'play' || mediaInfo.state === 'pause');
+
   return (
     <Paper
       elevation={8}
@@ -526,13 +598,13 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
         </Box>
       )}
 
-      <Box sx={{
+      <Box sx={{ width: '100%' }}>
+        <Box sx={{
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           gap: 1.5,
           minHeight: 40,
-          width: '100%',
           px: 2,
           py: 1,
           borderRadius: 2,
@@ -540,25 +612,53 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
           cursor: 'pointer',
           transition: 'background-color 0.2s',
           '&:hover': {
-              backgroundColor: 'action.selected',
+            backgroundColor: 'action.selected',
           }
-      }}
+        }}
           onClick={() => setMediaModalOpen(true)}
-      >
+        >
           {isAppLoading ? (
-              <CircularProgress size={20} />
+            <CircularProgress size={20} />
           ) : activeApp && activeApp.id !== 'roku' ? (
-              <>
-                  <ActiveAppIcon device={device} app={activeApp} />
-                  <Typography variant="body2" sx={{ fontWeight: 500 }} noWrap>
-                      {activeApp.name}
-                  </Typography>
-              </>
-          ) : (
-              <Typography variant="body2" color="text.secondary">
-                  Home Screen
+            <>
+              <ActiveAppIcon device={device} app={activeApp} />
+              <Typography variant="body2" sx={{ fontWeight: 500 }} noWrap>
+                {activeApp.name}
               </Typography>
+            </>
+          ) : (
+            <Typography variant="body2" color="text.secondary">
+              Home Screen
+            </Typography>
           )}
+        </Box>
+
+        {/* Progress Bar Section */}
+        {showProgress && (
+          <Box sx={{mt: 1.5 }}>
+            <LinearProgress
+              variant="determinate"
+              value={progress}
+              sx={{
+                height: 6,
+                borderRadius: 1,
+                backgroundColor: 'action.hover',
+                '& .MuiLinearProgress-bar': {
+                  backgroundColor: isPlaying ? 'primary.main' : 'text.secondary',
+                  transition: 'width 0.5s ease-in-out',
+                }
+              }}
+            />
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 0.5 }}>
+              <Typography variant="caption" sx={{ fontSize: '0.7rem', color: 'text.secondary' }}>
+                {formatTime(position)}
+              </Typography>
+              <Typography variant="caption" sx={{ fontSize: '0.7rem', color: 'text.secondary' }}>
+                {formatTime(duration)}
+              </Typography>
+            </Box>
+          </Box>
+        )}
       </Box>
 
       <Stack
@@ -662,16 +762,17 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
         </Typography>
       )}
 
+      <MediaPlayerModal
+        open={mediaModalOpen}
+        onClose={() => setMediaModalOpen(false)}
+        device={device}
+      />
+
       <Snackbar open={!!feedback} autoHideDuration={3000} onClose={() => setFeedback(null)} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }} >
         <Alert onClose={() => setFeedback(null)} severity={feedback?.severity} sx={{ width: '100%' }} >
           {feedback?.message}
         </Alert>
       </Snackbar>
-      <MediaPlayerModal
-          open={mediaModalOpen}
-          onClose={() => setMediaModalOpen(false)}
-          device={device}
-      />
     </Paper>
   );
 };
