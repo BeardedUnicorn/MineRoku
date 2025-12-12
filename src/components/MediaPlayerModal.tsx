@@ -14,7 +14,7 @@ import {
     Alert,
     IconButton,
     Divider,
-    Grid,
+    GridLegacy as Grid,
 } from '@mui/material';
 import {
     Close as CloseIcon,
@@ -121,7 +121,7 @@ const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({ open, onClose, devi
         return `${minutes}:${seconds.toString().padStart(2, '0')}`;
     };
 
-    const getStateIcon = (state: string) => {
+    const getStateIcon = (state: string): React.ReactElement | undefined => {
         switch (state) {
             case 'play':
                 return <PlayIcon />;
@@ -130,7 +130,7 @@ const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({ open, onClose, devi
             case 'stop':
                 return <StopIcon />;
             default:
-                return null;
+                return undefined;
         }
     };
 
