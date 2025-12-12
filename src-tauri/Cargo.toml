@@ -15,12 +15,12 @@ name = "roku_controller_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = { version = "~2.5.3", features = [] }
 
 [dependencies]
-tauri = { version = "2.0.0", features = [ "tray-icon", "rustls-tls" ] }
-tauri-plugin-opener = "2"
-tauri-plugin-os = "2"
+tauri = { version = "~2.9.4", features = [ "tray-icon", "rustls-tls" ] }
+tauri-plugin-opener = "~2.5.2"
+tauri-plugin-os = "~2.3.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
@@ -35,7 +35,13 @@ ssdp-client = { path = "../crates/ssdp-client" }
 base64 = "0.22.1"
 rusqlite = { version = "0.30", features = ["bundled"] }
 chrono = { version = "0.4", default-features = true, features = ["clock"] }
+log = "0.4"
+env_logger = "0.10"
 
 [patch.crates-io]
 roku = { path = "../crates/roku" }
 ssdp-client = { path = "../crates/ssdp-client" }
+
+
+[target.'cfg(target_os = "android")'.dependencies]
+android_logger = "0.13"

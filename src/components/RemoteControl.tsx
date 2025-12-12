@@ -31,6 +31,7 @@ import {
   playbackButtonSpecs,
   powerButtonSpecs,
 } from './RemoteButtonSpecs';
+import MediaPlayerModal from './MediaPlayerModal';
 
 export interface RokuDevice {
   name: string;
@@ -228,8 +229,10 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
   const hasLoadedRef = useRef(false);
   const lastDeviceKeyRef = useRef<string | null>(null);
   const busyRef = useRef<Set<string>>(new Set());
-  const mountedRef = useRef(true);
+  const abortControllerRef = useRef<AbortController | null>(null);
   const [currentPlatform, setCurrentPlatform] = useState<string | null>(null);
+  const [mediaModalOpen, setMediaModalOpen] = useState(false);
+
 
   useEffect(() => {
     const fetchPlatform = async () => {
@@ -243,58 +246,82 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
       }
     };
     fetchPlatform();
-    return () => {
-      mountedRef.current = false;
-    };
   }, []);
 
   useEffect(() => {
     if (!device) return;
+    
+    // Cancel any previous fetch
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    
     const currentKey = `${device.ip}:${device.port}`;
-
-    // Avoid re-triggering the loading spinner if the same device is re-selected with identical endpoint.
     const isSameDevice = lastDeviceKeyRef.current === currentKey;
     lastDeviceKeyRef.current = currentKey;
 
     const initialFetch = async () => {
+      // Create new abort controller for this fetch
+      const abortController = new AbortController();
+      abortControllerRef.current = abortController;
+
       if (!isSameDevice) {
         setIsAppLoading(true);
-      } else if (hasLoadedRef.current) {
-        // Already loaded for this device; don't flip the spinner again.
-        setIsAppLoading(false);
+        hasLoadedRef.current = false;
       }
 
-      // Fallback in case backend takes too long; cleared on success/failure.
       const timeoutId = window.setTimeout(() => {
-        if (mountedRef.current) setIsAppLoading(false);
+        if (!abortController.signal.aborted) {
+          setIsAppLoading(false);
+        }
       }, 6500);
+
       try {
         if (device.status && device.status !== 'connected') {
           setActiveApp(null);
           return;
         }
+        
         const appInfo: ActiveApp = await invoke('get_active_app', {
           ip: device.ip,
           port: device.port,
         });
-        if (mountedRef.current) {
-          setActiveApp(appInfo);
-          hasLoadedRef.current = true;
+        
+        // Check if this fetch was aborted
+        if (abortController.signal.aborted) {
+          return;
         }
+        
+        setActiveApp(appInfo);
+        hasLoadedRef.current = true;
       } catch (error) {
-        console.error('Could not fetch active app on initial load:', error);
-        if (mountedRef.current) {
-          setActiveApp(null);
+        if (abortController.signal.aborted) {
+          return;
         }
+        
+        console.error('Could not fetch active app on initial load:', error);
+        const fallbackApp = { name: 'Home Screen', id: 'roku' };
+        setActiveApp(fallbackApp);
+        setFeedback({ 
+          message: `Could not fetch active app: ${error}`, 
+          severity: 'error' 
+        });
       } finally {
         clearTimeout(timeoutId);
-        if (mountedRef.current) {
+        if (!abortController.signal.aborted) {
           setIsAppLoading(false);
         }
       }
     };
 
     initialFetch();
+
+    // Cleanup function
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
   }, [device.ip, device.port, device.status]);
 
   useEffect(() => {
@@ -311,7 +338,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
           ip: device.ip,
           port: device.port
         });
-        if (mountedRef.current) setActiveApp(appInfo);
+        setActiveApp(appInfo);
       } catch (error) {
         // Avoid spamming logs when device briefly unreachable; ignore here.
       }
@@ -339,7 +366,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
     });
 
     Window.getCurrent().isFocused().then((focused: boolean) => {
-        if (focused && mountedRef.current) {
+        if (focused) {
             startPolling();
         }
     });
@@ -367,12 +394,10 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
         });
       } catch (error) {
         console.error(`Error sending command ${command}:`, error);
-        if (mountedRef.current) {
-          setFeedback({
-            message: `Error: ${String(error)}`,
-            severity: 'error',
-          });
-        }
+        setFeedback({
+          message: `Error: ${String(error)}`,
+          severity: 'error',
+        });
       } finally {
         busyRef.current.delete(command);
       }
@@ -381,6 +406,11 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
   );
 
   useEffect(() => {
+    // Skip keyboard shortcuts on mobile
+    if (currentPlatform === 'android' || currentPlatform === 'ios') {
+        return;
+    }
+
     const isEditableTarget = (target: EventTarget | null) => {
       const el = target as HTMLElement | null;
       if (!el) return false;
@@ -445,14 +475,11 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [sendCommand]);
+  }, [sendCommand, currentPlatform]);
 
   const systemButtons = useMemo<CommandSpec[]>(() => systemButtonSpecs, []);
-
   const volumeButtons = useMemo<CommandSpec[]>(() => volumeButtonSpecs, []);
-
   const playbackButtons = useMemo<CommandSpec[]>(() => playbackButtonSpecs, []);
-
   const powerButtons = useMemo<CommandSpec[]>(() => powerButtonSpecs, []);
 
   return (
@@ -500,17 +527,24 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
       )}
 
       <Box sx={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 1.5,
-        minHeight: 40,
-        width: '100%',
-        px: 2,
-        py: 1,
-        borderRadius: 2,
-        backgroundColor: 'action.hover'
-      }}>
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 1.5,
+          minHeight: 40,
+          width: '100%',
+          px: 2,
+          py: 1,
+          borderRadius: 2,
+          backgroundColor: 'action.hover',
+          cursor: 'pointer',
+          transition: 'background-color 0.2s',
+          '&:hover': {
+              backgroundColor: 'action.selected',
+          }
+      }}
+          onClick={() => setMediaModalOpen(true)}
+      >
           {isAppLoading ? (
               <CircularProgress size={20} />
           ) : activeApp && activeApp.id !== 'roku' ? (
@@ -633,6 +667,11 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
           {feedback?.message}
         </Alert>
       </Snackbar>
+      <MediaPlayerModal
+          open={mediaModalOpen}
+          onClose={() => setMediaModalOpen(false)}
+          device={device}
+      />
     </Paper>
   );
 };

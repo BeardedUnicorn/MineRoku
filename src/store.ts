@@ -85,8 +85,8 @@ export const useAppStore = create<AppState>()(
                 }));
             },
             addDiscoveredDevices: (discovered) => {
-                // Manual discovery should upsert discovered devices as connected,
-                // and never mark others offline — background events handle disconnections.
+                // Manual discovery upserts discovered devices as connected;
+                // callers handle marking missing devices offline if needed.
                 const state = get();
                 const existingDevices = state.devices;
                 const discoveredIps = new Set(discovered.map(d => d.ip));

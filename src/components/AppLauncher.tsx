@@ -76,7 +76,7 @@ const AppIcon: React.FC<{ device: RokuDevice; appId: string; appName: string; si
         };
 
         fetchIcon();
-    }, [device.ip, device.port, appId]);
+    }, [device.ip, device.port, appId, appName, cacheKey]);
 
     const sxProps = {
         height: size,
@@ -116,12 +116,11 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
         toggleFavoriteApp: state.toggleFavoriteApp,
     }));
 
-    const fetchApps = async () => {
+    const fetchApps = async (retryCount = 0) => {
         setIsLoading(true);
         setCurrentPage(1);
         try {
             if (device.status && device.status !== 'connected') {
-                // When offline, rely on cached apps loaded in useEffect.
                 setIsLoading(false);
                 return;
             }
@@ -129,11 +128,27 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
                 ip: device.ip,
                 port: device.port,
             });
+            
+            // If we get an empty response and haven't retried yet, try once more after a delay
+            if (rokuApps.length === 0 && retryCount === 0) {
+                console.log('No apps found, retrying in 2 seconds...');
+                setTimeout(() => fetchApps(1), 2000);
+                return;
+            }
+            
             // Sort apps alphabetically by name
             setApps(rokuApps.sort((a, b) => a.name.localeCompare(b.name)));
         } catch (error) {
             console.error('Error fetching apps:', error);
             const errorMessage = typeof error === 'string' ? error : 'An unknown error occurred.';
+            
+            // If it's a parse error and we haven't retried, try again
+            if (errorMessage.includes('parse') && retryCount === 0) {
+                console.log('Parse error encountered, retrying in 2 seconds...');
+                setTimeout(() => fetchApps(1), 2000);
+                return;
+            }
+            
             setFeedback({ message: `Error fetching apps: ${errorMessage}`, severity: 'error' });
         } finally {
             setIsLoading(false);
@@ -150,7 +165,7 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
             await invoke('launch_roku_app', {
                 ip: device.ip,
                 port: device.port,
-                app_id: appId,
+                appId,  // Fixed: was `app_id: appId`
             });
             setFeedback({ message: `Launched "${appName}"`, severity: 'success' });
         } catch (error) {
@@ -200,6 +215,10 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
     const paginatedApps = filteredApps.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
     const handlePageChange = (_event: React.ChangeEvent<unknown>, value: number) => {
         setCurrentPage(value);
+    };
+
+    const handleRefreshClick = () => {
+        fetchApps();
     };
 
     const favoriteAppDetails = favoriteApps
@@ -255,7 +274,7 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
                             ),
                         }}
                     />
-                    <Button variant="outlined" size="medium" onClick={fetchApps} disabled={isLoading} startIcon={<RefreshIcon />}>
+                    <Button variant="outlined" size="medium" onClick={handleRefreshClick} disabled={isLoading} startIcon={<RefreshIcon />}>
                         Refresh
                     </Button>
                 </Box>

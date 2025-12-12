@@ -22,6 +22,8 @@ pnpm-debug.log*
 .npm/
 .yarn/
 .pnpm-store/
+.pnp.cjs
+.pnp.loader.mjs
 
 # IDEs
 .vscode/

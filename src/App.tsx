@@ -38,6 +38,7 @@ const App: React.FC = () => {
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [mobileView, setMobileView] = useState<'remote' | 'apps'>('remote');
     const [isScanning, setIsScanning] = useState(false);
+    const [scanStatus, setScanStatus] = useState<string>('');
     const theme = useTheme();
     const isMobile = useMediaQuery(theme.breakpoints.down('md'));
     const prefersReducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
@@ -68,12 +69,20 @@ const App: React.FC = () => {
     const scanForDevices = useCallback(async () => {
         setIsScanning(true);
         setIsSearching(true);
+        setScanStatus('Scanning network...');
         try {
             const foundDevices: RokuDevice[] = await invoke('discover_roku_devices');
             addDiscoveredDevices(foundDevices);
+            const discoveredIps = new Set(foundDevices.map((d) => d.ip));
+            // Mark devices that were not seen in this manual sweep as disconnected.
+            useAppStore.getState().devices.forEach((device) => {
+                if (!discoveredIps.has(device.ip)) {
+                    markDeviceDisconnected(device.ip);
+                }
+            });
             const anyDevicesFound = foundDevices.length > 0;
             setDevicesFound(anyDevicesFound);
-            // Do not mark devices offline or flip selection here; background events manage that.
+            setScanStatus(anyDevicesFound ? `Found ${foundDevices.length} device(s)` : 'No devices found');
             // If nothing is selected and we found devices, pick the first for quick start.
             if (!useAppStore.getState().selectedDevice && anyDevicesFound) {
                 const next = { ...foundDevices[0], status: 'connected' as RokuDevice['status'] } as RokuDevice;
@@ -81,12 +90,13 @@ const App: React.FC = () => {
             }
         } catch (err) {
             console.error("Discovery error:", err);
-            // Keep existing devices/selection; background discovery will update when available.
+            setScanStatus(`Error: ${err}`);
+            // Keep existing devices/selection; user can retry manually.
         } finally {
             setIsScanning(false);
             setIsSearching(false);
         }
-    }, [addDiscoveredDevices, setSelectedDevice]);
+    }, [addDiscoveredDevices, setSelectedDevice, markDeviceDisconnected]);
 
     useEffect(() => {
         // Bootstrap from cached devices so the list is populated immediately.
@@ -112,11 +122,18 @@ const App: React.FC = () => {
         // Listen for background discovery lifecycle and device events
         let unsubs: Array<() => void> = [];
         const init = async () => {
-            const u1 = await listen('discovery_cycle_start', () => setIsScanning(true));
-            const u2 = await listen('discovery_cycle_end', () => setIsScanning(false));
-            const u3 = await listen<any>('device_discovered', (event) => {
+            const u1 = await listen('discovery_cycle_start', () => {
+                setIsScanning(true);
+                setIsSearching(true);
+            });
+            const u2 = await listen('discovery_cycle_end', () => {
+                setIsScanning(false);
+                setIsSearching(false);
+            });
+            const u3 = await listen<RokuDevice>('device_discovered', (event) => {
                 const dev = event.payload as RokuDevice;
                 upsertDevice({ ...dev, status: 'connected' });
+                setDevicesFound(true);
                 // Auto-select policy: if preferLastUsed is false, prefer first discovered.
                 const state = useAppStore.getState();
                 if (!state.selectedDevice) {
@@ -141,7 +158,7 @@ const App: React.FC = () => {
         return () => {
             unsubs.forEach((u) => u && u());
         };
-    }, [scanForDevices, upsertDevice, markDeviceDisconnected, setSelectedDevice]);
+    }, [scanForDevices, upsertDevice, markDeviceDisconnected, setSelectedDevice, preferLastUsed]);
 
     const contentVariants = useMemo(() => prefersReducedMotion
         ? {
@@ -192,6 +209,11 @@ const App: React.FC = () => {
                     <Typography variant="h6" color="text.secondary">
                         Searching for Roku devices...
                     </Typography>
+                    {scanStatus && (
+                        <Typography variant="body2" color="text.secondary">
+                            {scanStatus}
+                        </Typography>
+                    )}
                 </Box>
             );
         }
@@ -201,15 +223,21 @@ const App: React.FC = () => {
                     <SearchOffIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
                     <Typography variant="h6" color="text.secondary">No Roku Devices Found</Typography>
                     <Typography variant="body1" color="text.secondary" sx={{ mt: 1 }}>
-                       Please ensure your Roku is powered on and connected to the same network. Tap refresh to scan again.
+                       Please ensure your Roku is powered on and connected to the same WiFi network. Tap refresh to scan again.
                     </Typography>
+                    {scanStatus && (
+                        <Typography variant="body2" color="error" sx={{ mt: 1 }}>
+                            {scanStatus}
+                        </Typography>
+                    )}
                     <Button
                         variant="contained"
-                        startIcon={<RefreshIcon />}
+                        startIcon={isScanning ? <CircularProgress size={16} color="inherit" /> : <RefreshIcon />}
                         sx={{ mt: 2 }}
                         onClick={scanForDevices}
+                        disabled={isScanning}
                     >
-                        Refresh
+                        {isScanning ? 'Scanning...' : 'Refresh'}
                     </Button>
                 </Paper>
             );
@@ -222,7 +250,7 @@ const App: React.FC = () => {
                 </Typography>
             </Paper>
         );
-    }, [selectedDevice, isMobile, mobileView, contentVariants, devices.length, devicesFound, isSearching, scanForDevices]);
+    }, [selectedDevice, isMobile, mobileView, contentVariants, devices.length, devicesFound, isSearching, scanForDevices, isScanning, scanStatus]);
 
     return (
         <Box className="app-container">

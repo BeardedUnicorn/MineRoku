@@ -1,5 +1,3 @@
-// src-tauri/src/lib.rs
-
 // Make all functions and structs public
 pub mod commands;
 mod background;
@@ -12,7 +10,8 @@ use tauri::Manager;
 
 use commands::{
     discover_roku_devices_impl, get_active_app_impl, get_app_icon_impl, launch_roku_app_impl,
-    list_roku_apps_impl, open_popup_window_impl, send_roku_command_impl, ActiveAppInfo, RokuApp,
+    list_roku_apps_impl, open_popup_window_impl, send_roku_command_impl, test_network_connectivity, ActiveAppInfo, RokuApp,
+    get_media_player_impl, MediaPlayerInfo,
     RokuDevice,
 };
 
@@ -23,8 +22,13 @@ use background_discovery::start_background_discovery;
 use background::init_background_tasks;
 
 #[command]
-async fn discover_roku_devices() -> Result<Vec<RokuDevice>, String> {
-    discover_roku_devices_impl().await
+async fn discover_roku_devices(app: tauri::AppHandle) -> Result<Vec<RokuDevice>, String> {
+    discover_roku_devices_impl(&app).await
+}
+
+#[command]
+async fn get_media_player(ip: String, port: u16) -> Result<MediaPlayerInfo, String> {
+    get_media_player_impl(ip, port).await
 }
 
 #[command]
@@ -69,6 +73,24 @@ fn handle_tray_event(app: &AppHandle, event: TrayIconEvent) {
     }
 }
 
+#[tauri::command]
+async fn get_cached_devices() -> Result<Vec<RokuDevice>, String> {
+    let cached = background::get_devices_bg().await?;
+    Ok(cached
+        .into_iter()
+        .map(|d| RokuDevice { name: d.name, ip: d.ip, port: d.port, url: d.url })
+        .collect())
+}
+
+#[tauri::command]
+async fn get_cached_apps(ip: String) -> Result<Vec<RokuApp>, String> {
+    let cached = background::get_apps_bg(ip).await?;
+    Ok(cached
+        .into_iter()
+        .map(|a| RokuApp { id: a.id, name: a.name, version: a.version })
+        .collect())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default()
@@ -81,6 +103,8 @@ pub fn run() {
             launch_roku_app,
             get_active_app,
             get_app_icon,
+            get_media_player,
+            test_network_connectivity,
             open_popup_window,
             get_cached_devices,
             get_cached_apps
@@ -91,17 +115,28 @@ pub fn run() {
         .setup(|app| {
             // Initialize lightweight SQLite cache for devices/apps
             // Prefer a per-app data dir; fall back to current dir if unavailable.
-            let db_path = app
-                .path()
-                .app_data_dir()
-                .map(|p| p.join("roku_cache.db"))
-                .unwrap_or_else(|_| std::path::PathBuf::from("roku_cache.db"));
+            let db_path = match app.path().app_data_dir() {
+                Ok(p) => {
+                    if let Err(e) = std::fs::create_dir_all(&p) {
+                        eprintln!("Failed to create app data dir: {}", e);
+                    }
+                    p.join("roku_cache.db")
+                }
+                Err(e) => {
+                    eprintln!("Failed to get app data dir: {}", e);
+                    // On Android, try to use cache dir as fallback
+                    app.path()
+                        .app_cache_dir()
+                        .map(|p| p.join("roku_cache.db"))
+                        .unwrap_or_else(|_| std::path::PathBuf::from("roku_cache.db"))
+                }
+            };
             if let Some(parent) = db_path.parent() { let _ = std::fs::create_dir_all(parent); }
             if let Err(e) = init_background_tasks(db_path.to_string_lossy().to_string()) {
                 eprintln!("Failed to init cache DB: {}", e);
             }
 
-            // Start background device discovery and emit events to all windows.
+            // Initial one-shot discovery to populate devices on launch.
             start_background_discovery(app.app_handle().clone());
             // Use the default tray icon configured by Tauri; avoid deprecated
             // Image::from_bytes (not available in Tauri v2). If a custom icon
@@ -126,24 +161,6 @@ pub fn run() {
         start_background_discovery(app.app_handle().clone());
         Ok(())
     });
-
-#[tauri::command]
-async fn get_cached_devices() -> Result<Vec<RokuDevice>, String> {
-    let cached = background::get_devices_bg().await?;
-    Ok(cached
-        .into_iter()
-        .map(|d| RokuDevice { name: d.name, ip: d.ip, port: d.port, url: d.url })
-        .collect())
-}
-
-#[tauri::command]
-async fn get_cached_apps(ip: String) -> Result<Vec<RokuApp>, String> {
-    let cached = background::get_apps_bg(ip).await?;
-    Ok(cached
-        .into_iter()
-        .map(|a| RokuApp { id: a.id, name: a.name, version: a.version })
-        .collect())
-}
 
     builder
         .run(tauri::generate_context!())
