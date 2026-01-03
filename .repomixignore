@@ -1,0 +1,6 @@
+*.idx
+*.icns
+*.pack
+*.rev
+*.db
+**/.git

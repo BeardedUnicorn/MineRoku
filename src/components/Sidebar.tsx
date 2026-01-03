@@ -6,13 +6,14 @@ import { shallow } from 'zustand/shallow';
 import {
     Drawer, List, ListItemButton, ListItemText,
     Typography, Box, IconButton, Divider, CircularProgress, Tooltip, useTheme, useMediaQuery,
-    Dialog, DialogTitle, DialogContent, FormControlLabel, Switch
+    Dialog, DialogTitle, DialogContent, DialogActions, FormControlLabel, Switch, Stack, Button
 } from '@mui/material';
 import {
     Refresh as RefreshIcon,
     Settings as SettingsIcon,
     Info as InfoIcon,
-    Add as AddIcon
+    Add as AddIcon,
+    DeleteForever as DeleteForeverIcon
 } from '@mui/icons-material';
 
 interface SidebarProps {
@@ -30,19 +31,51 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, scanForDevices, isS
     const setSelectedDevice = useAppStore((s) => s.setSelectedDevice);
     const preferLastUsed = useAppStore((s) => s.preferLastUsed);
     const setPreferLastUsed = useAppStore((s) => s.setPreferLastUsed);
+    const showAllDevices = useAppStore((s) => s.showAllDevices);
+    const setShowAllDevices = useAppStore((s) => s.setShowAllDevices);
     const theme = useTheme();
     const isMobile = useMediaQuery(theme.breakpoints.down('md'));
     const [settingsOpen, setSettingsOpen] = React.useState(false);
+    const [confirmDeleteOpen, setConfirmDeleteOpen] = React.useState(false);
+    const [isDeleting, setIsDeleting] = React.useState(false);
 
     const handleDeviceSelect = (device: RokuDevice) => {
         setSelectedDevice(device);
         if (isMobile) {
-            onToggle(); // Close sidebar on selection in mobile view
+            onToggle();
         }
     };
 
     const openPopupWindow = () => {
         invoke('open_popup_window');
+    };
+
+    const handleDeleteAllData = async () => {
+        setIsDeleting(true);
+        try {
+            // Clear backend database
+            await invoke('clear_all_data');
+            
+            // Clear frontend localStorage
+            localStorage.removeItem('roku-remote-storage');
+            
+            // Clear any other localStorage items that might exist
+            const keysToRemove: string[] = [];
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && key.startsWith('roku')) {
+                    keysToRemove.push(key);
+                }
+            }
+            keysToRemove.forEach(key => localStorage.removeItem(key));
+            
+            // Restart the app
+            await invoke('restart_app');
+        } catch (error) {
+            console.error('Failed to delete data:', error);
+            setIsDeleting(false);
+            setConfirmDeleteOpen(false);
+        }
     };
 
     const drawerWidth = 280;
@@ -53,7 +86,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, scanForDevices, isS
             variant={isMobile ? 'temporary' : 'permanent'}
             open={isOpen}
             onClose={onToggle}
-            ModalProps={{ keepMounted: true }} // Better for mobile performance
+            ModalProps={{ keepMounted: true }}
             sx={{
                 width: drawerWidth,
                 flexShrink: 0,
@@ -71,7 +104,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, scanForDevices, isS
                 justifyContent: 'space-between',
                 p: 1,
                 backgroundColor: 'background.default',
-                height: '64px' // Match AppBar height
+                height: '64px'
             }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, ml: 1 }}>
                     <Typography variant="h6" sx={{ color: 'text.primary' }}>Roku Devices</Typography>
@@ -83,20 +116,31 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, scanForDevices, isS
                 <List>
                     {devices.map((device: RokuDevice) => (
                         <ListItemButton
-                            key={device.ip}
-                            selected={selectedDevice?.ip === device.ip}
+                            key={device.hardware_id}
+                            selected={selectedDevice?.hardware_id === device.hardware_id}
                             onClick={() => handleDeviceSelect(device)}
                         >
-                            <ListItemText primary={device.name} secondary={device.ip} />
-                            <Box
-                                aria-label={device.status === 'connected' ? 'Device online' : 'Device offline'}
-                                sx={{
-                                    width: 10,
-                                    height: 10,
-                                    borderRadius: '50%',
-                                    bgcolor: device.status === 'connected' ? 'success.main' : 'text.disabled',
+                            <ListItemText 
+                                primary={device.name} 
+                                secondary={device.ip}
+                                secondaryTypographyProps={{
+                                    sx: { 
+                                        fontSize: '0.75rem',
+                                        opacity: device.status === 'connected' ? 1 : 0.6
+                                    }
                                 }}
                             />
+                            <Tooltip title={device.status === 'connected' ? 'Online' : 'Offline'}>
+                                <Box
+                                    aria-label={device.status === 'connected' ? 'Device online' : 'Device offline'}
+                                    sx={{
+                                        width: 10,
+                                        height: 10,
+                                        borderRadius: '50%',
+                                        bgcolor: device.status === 'connected' ? 'success.main' : 'text.disabled',
+                                    }}
+                                />
+                            </Tooltip>
                         </ListItemButton>
                     ))}
                     {!devices.length && (
@@ -145,14 +189,99 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, scanForDevices, isS
                 </Tooltip>
             </Box>
         </Drawer>
-        <Dialog open={settingsOpen} onClose={() => setSettingsOpen(false)}>
+
+        {/* Settings Dialog */}
+        <Dialog open={settingsOpen} onClose={() => setSettingsOpen(false)} maxWidth="xs" fullWidth>
             <DialogTitle>Settings</DialogTitle>
             <DialogContent>
-                <FormControlLabel
-                    control={<Switch checked={preferLastUsed} onChange={(e) => setPreferLastUsed(e.target.checked)} />}
-                    label="Prefer last-used device on startup"
-                />
+                <Stack spacing={2} sx={{ mt: 1 }}>
+                    <FormControlLabel
+                        control={
+                            <Switch 
+                                checked={preferLastUsed} 
+                                onChange={(e) => setPreferLastUsed(e.target.checked)} 
+                            />
+                        }
+                        label="Prefer last-used device on startup"
+                    />
+                    <FormControlLabel
+                        control={
+                            <Switch 
+                                checked={showAllDevices} 
+                                onChange={(e) => setShowAllDevices(e.target.checked)} 
+                            />
+                        }
+                        label="Show all discovered devices"
+                    />
+                    <Typography variant="caption" color="text.secondary">
+                        When disabled, the app will auto-select the first device found for faster startup.
+                    </Typography>
+                    
+                    <Divider sx={{ my: 2 }} />
+                    
+                    <Typography variant="subtitle2" color="text.secondary">
+                        Data Management
+                    </Typography>
+                    <Button
+                        variant="outlined"
+                        color="error"
+                        startIcon={<DeleteForeverIcon />}
+                        onClick={() => setConfirmDeleteOpen(true)}
+                        fullWidth
+                    >
+                        Delete All Data
+                    </Button>
+                    <Typography variant="caption" color="text.secondary">
+                        This will remove all saved devices, favorites, cached icons, and settings. The app will restart afterward.
+                    </Typography>
+                </Stack>
             </DialogContent>
+            <DialogActions>
+                <Button onClick={() => setSettingsOpen(false)}>Close</Button>
+            </DialogActions>
+        </Dialog>
+
+        {/* Confirm Delete Dialog */}
+        <Dialog 
+            open={confirmDeleteOpen} 
+            onClose={() => !isDeleting && setConfirmDeleteOpen(false)}
+            maxWidth="xs"
+            fullWidth
+        >
+            <DialogTitle sx={{ color: 'error.main' }}>
+                Delete All Data?
+            </DialogTitle>
+            <DialogContent>
+                <Typography variant="body1" sx={{ mb: 2 }}>
+                    This action cannot be undone. The following will be permanently deleted:
+                </Typography>
+                <Box component="ul" sx={{ pl: 2, m: 0 }}>
+                    <li><Typography variant="body2">All saved Roku devices</Typography></li>
+                    <li><Typography variant="body2">Favorite apps</Typography></li>
+                    <li><Typography variant="body2">Cached app icons</Typography></li>
+                    <li><Typography variant="body2">All settings and preferences</Typography></li>
+                </Box>
+                <Typography variant="body2" sx={{ mt: 2, fontWeight: 500 }}>
+                    The app will restart after deletion.
+                </Typography>
+            </DialogContent>
+            <DialogActions>
+                <Button 
+                    onClick={() => setConfirmDeleteOpen(false)} 
+                    disabled={isDeleting}
+                >
+                    Cancel
+                </Button>
+                <Button 
+                    onClick={handleDeleteAllData} 
+                    color="error" 
+                    variant="contained"
+                    disabled={isDeleting}
+                    startIcon={isDeleting ? <CircularProgress size={16} color="inherit" /> : <DeleteForeverIcon />}
+                >
+                    {isDeleting ? 'Deleting...' : 'Delete All & Restart'}
+                </Button>
+            </DialogActions>
         </Dialog>
         </>
     );

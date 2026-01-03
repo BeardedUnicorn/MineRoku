@@ -12,6 +12,15 @@ import './App.css';
 import { useAppStore, RokuDevice } from './store';
 import { shallow } from 'zustand/shallow';
 
+// Type for device events from backend (without status)
+interface RokuDeviceEvent {
+    name: string;
+    ip: string;
+    port: number;
+    url: string;
+    hardware_id: string;
+}
+
 const App: React.FC = () => {
     const {
         selectedDevice,
@@ -44,7 +53,6 @@ const App: React.FC = () => {
     const prefersReducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
 
     useEffect(() => {
-        // Keep sidebar closed by default on mobile, open on desktop
         setIsSidebarOpen(!isMobile);
     }, [isMobile]);
 
@@ -53,8 +61,6 @@ const App: React.FC = () => {
             emit('device-changed', selectedDevice);
         });
 
-        // Always emit the latest device info. This handles initial load for the popup
-        // and any subsequent changes to the selected device.
         emit('device-changed', selectedDevice);
 
         return () => {
@@ -71,27 +77,33 @@ const App: React.FC = () => {
         setIsSearching(true);
         setScanStatus('Scanning network...');
         try {
-            const foundDevices: RokuDevice[] = await invoke('discover_roku_devices');
-            addDiscoveredDevices(foundDevices);
-            const discoveredIps = new Set(foundDevices.map((d) => d.ip));
-            // Mark devices that were not seen in this manual sweep as disconnected.
+            const foundDevices: RokuDeviceEvent[] = await invoke('discover_roku_devices');
+            const devicesWithStatus: RokuDevice[] = foundDevices.map(d => ({
+                ...d,
+                status: 'connected' as const,
+            }));
+            addDiscoveredDevices(devicesWithStatus);
+            
+            // Mark devices not found in this scan as disconnected
+            const discoveredIds = new Set(foundDevices.map((d) => d.hardware_id));
             useAppStore.getState().devices.forEach((device) => {
-                if (!discoveredIps.has(device.ip)) {
-                    markDeviceDisconnected(device.ip);
+                if (!discoveredIds.has(device.hardware_id)) {
+                    markDeviceDisconnected(device.hardware_id);
                 }
             });
+            
             const anyDevicesFound = foundDevices.length > 0;
             setDevicesFound(anyDevicesFound);
             setScanStatus(anyDevicesFound ? `Found ${foundDevices.length} device(s)` : 'No devices found');
-            // If nothing is selected and we found devices, pick the first for quick start.
+            
+            // Auto-select first device if nothing selected
             if (!useAppStore.getState().selectedDevice && anyDevicesFound) {
-                const next = { ...foundDevices[0], status: 'connected' as RokuDevice['status'] } as RokuDevice;
+                const next: RokuDevice = { ...foundDevices[0], status: 'connected' };
                 setSelectedDevice(next);
             }
         } catch (err) {
             console.error("Discovery error:", err);
             setScanStatus(`Error: ${err}`);
-            // Keep existing devices/selection; user can retry manually.
         } finally {
             setIsScanning(false);
             setIsSearching(false);
@@ -99,16 +111,14 @@ const App: React.FC = () => {
     }, [addDiscoveredDevices, setSelectedDevice, markDeviceDisconnected]);
 
     useEffect(() => {
-        // Bootstrap from cached devices so the list is populated immediately.
+        // Bootstrap from cached devices
         (async () => {
             try {
-                const cached: Omit<RokuDevice, 'status'>[] = await invoke('get_cached_devices');
+                const cached: RokuDeviceEvent[] = await invoke('get_cached_devices');
                 if (cached && cached.length) {
                     cached.forEach((d) => upsertDevice({ ...d, status: 'disconnected' }));
-                    if (preferLastUsed) {
-                        if (!useAppStore.getState().selectedDevice) {
-                            setSelectedDevice({ ...cached[0], status: 'disconnected' } as RokuDevice);
-                        }
+                    if (preferLastUsed && !useAppStore.getState().selectedDevice) {
+                        setSelectedDevice({ ...cached[0], status: 'disconnected' });
                     }
                 }
             } catch (e) {
@@ -116,41 +126,39 @@ const App: React.FC = () => {
             }
         })();
 
-        // Initial scan to populate quickly on first load
+        // Initial scan
         scanForDevices();
 
-        // Listen for background discovery lifecycle and device events
+        // Listen for background discovery events
         let unsubs: Array<() => void> = [];
         const init = async () => {
             const u1 = await listen('discovery_cycle_start', () => {
                 setIsScanning(true);
                 setIsSearching(true);
             });
-            const u2 = await listen('discovery_cycle_end', () => {
+            const u2 = await listen<RokuDeviceEvent[]>('discovery_cycle_end', () => {
                 setIsScanning(false);
                 setIsSearching(false);
             });
-            const u3 = await listen<RokuDevice>('device_discovered', (event) => {
-                const dev = event.payload as RokuDevice;
+            const u3 = await listen<RokuDeviceEvent>('device_discovered', (event) => {
+                const dev = event.payload;
                 upsertDevice({ ...dev, status: 'connected' });
                 setDevicesFound(true);
-                // Auto-select policy: if preferLastUsed is false, prefer first discovered.
+                
                 const state = useAppStore.getState();
                 if (!state.selectedDevice) {
                     if (!state.preferLastUsed) {
                         setSelectedDevice({ ...dev, status: 'connected' });
                     }
                 } else if (!state.preferLastUsed && state.selectedDevice.status === 'disconnected') {
-                    // Only switch if different IP or the selected device remains offline
-                    if (state.selectedDevice.ip !== dev.ip) {
+                    if (state.selectedDevice.hardware_id !== dev.hardware_id) {
                         setSelectedDevice({ ...dev, status: 'connected' });
                     }
                 }
             });
-            const u4 = await listen<string>('device_lost', (event) => {
-                const ip = event.payload as unknown as string;
-                markDeviceDisconnected(ip);
-                // If the selected device went offline, keep it selected but marked as disconnected
+            const u4 = await listen<RokuDeviceEvent>('device_lost', (event) => {
+                const device = event.payload;
+                markDeviceDisconnected(device.hardware_id);
             });
             unsubs = [u1, u2, u3, u4];
         };
@@ -176,7 +184,7 @@ const App: React.FC = () => {
         if (selectedDevice) {
             return (
                 <motion.div
-                    key={selectedDevice.ip}
+                    key={selectedDevice.hardware_id}
                     initial="hidden"
                     animate="visible"
                     exit="exit"

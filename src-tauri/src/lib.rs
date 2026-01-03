@@ -1,6 +1,6 @@
-// Make all functions and structs public
 pub mod commands;
-mod background;
+pub mod background;
+pub mod background_discovery;
 
 #[cfg(desktop)]
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
@@ -10,14 +10,12 @@ use tauri::Manager;
 
 use commands::{
     discover_roku_devices_impl, get_active_app_impl, get_app_icon_impl, launch_roku_app_impl,
-    list_roku_apps_impl, open_popup_window_impl, send_roku_command_impl, test_network_connectivity, ActiveAppInfo, RokuApp,
-    get_media_player_impl, MediaPlayerInfo,
-    RokuDevice,
+    list_roku_apps_impl, open_popup_window_impl, send_roku_command_impl, test_network_connectivity, 
+    ActiveAppInfo, RokuApp, get_media_player_impl, MediaPlayerInfo, RokuDevice,
 };
 
 use tauri::command;
 use tauri_plugin_opener::init as opener;
-mod background_discovery;
 use background_discovery::start_background_discovery;
 use background::init_background_tasks;
 
@@ -66,8 +64,8 @@ fn handle_tray_event(app: &AppHandle, event: TrayIconEvent) {
     if let TrayIconEvent::Click { button, .. } = event {
         if button == tauri::tray::MouseButton::Left {
             if let Some(main) = app.get_webview_window("main") {
-                main.show().unwrap();
-                main.set_focus().unwrap();
+                let _ = main.show();
+                let _ = main.set_focus();
             }
         }
     }
@@ -78,7 +76,13 @@ async fn get_cached_devices() -> Result<Vec<RokuDevice>, String> {
     let cached = background::get_devices_bg().await?;
     Ok(cached
         .into_iter()
-        .map(|d| RokuDevice { name: d.name, ip: d.ip, port: d.port, url: d.url })
+        .map(|d| RokuDevice { 
+            name: d.name, 
+            ip: d.ip, 
+            port: d.port, 
+            url: d.url,
+            hardware_id: d.hardware_id,
+        })
         .collect())
 }
 
@@ -89,6 +93,18 @@ async fn get_cached_apps(ip: String) -> Result<Vec<RokuApp>, String> {
         .into_iter()
         .map(|a| RokuApp { id: a.id, name: a.name, version: a.version })
         .collect())
+}
+
+#[tauri::command]
+async fn clear_all_data() -> Result<(), String> {
+    background::clear_all_data_bg().await
+}
+
+#[tauri::command]
+async fn restart_app(app: tauri::AppHandle) -> Result<(), String> {
+    app.restart();
+    #[allow(unreachable_code)]
+    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -107,14 +123,14 @@ pub fn run() {
             test_network_connectivity,
             open_popup_window,
             get_cached_devices,
-            get_cached_apps
+            get_cached_apps,
+            clear_all_data,
+            restart_app
         ]);
 
     #[cfg(desktop)]
     let builder = builder
         .setup(|app| {
-            // Initialize lightweight SQLite cache for devices/apps
-            // Prefer a per-app data dir; fall back to current dir if unavailable.
             let db_path = match app.path().app_data_dir() {
                 Ok(p) => {
                     if let Err(e) = std::fs::create_dir_all(&p) {
@@ -124,23 +140,20 @@ pub fn run() {
                 }
                 Err(e) => {
                     eprintln!("Failed to get app data dir: {}", e);
-                    // On Android, try to use cache dir as fallback
                     app.path()
                         .app_cache_dir()
                         .map(|p| p.join("roku_cache.db"))
                         .unwrap_or_else(|_| std::path::PathBuf::from("roku_cache.db"))
                 }
             };
-            if let Some(parent) = db_path.parent() { let _ = std::fs::create_dir_all(parent); }
+            if let Some(parent) = db_path.parent() { 
+                let _ = std::fs::create_dir_all(parent); 
+            }
             if let Err(e) = init_background_tasks(db_path.to_string_lossy().to_string()) {
                 eprintln!("Failed to init cache DB: {}", e);
             }
 
-            // Initial one-shot discovery to populate devices on launch.
             start_background_discovery(app.app_handle().clone());
-            // Use the default tray icon configured by Tauri; avoid deprecated
-            // Image::from_bytes (not available in Tauri v2). If a custom icon
-            // is desired, configure it via tauri.conf.json.
             TrayIconBuilder::new().build(app)?;
             Ok(())
         })
@@ -148,13 +161,14 @@ pub fn run() {
 
     #[cfg(any(target_os = "android", target_os = "ios"))]
     let builder = builder.setup(|app| {
-        // Initialize cache on mobile and start discovery.
         let db_path = app
             .path()
             .app_data_dir()
             .map(|p| p.join("roku_cache.db"))
             .unwrap_or_else(|_| std::path::PathBuf::from("roku_cache.db"));
-        if let Some(parent) = db_path.parent() { let _ = std::fs::create_dir_all(parent); }
+        if let Some(parent) = db_path.parent() { 
+            let _ = std::fs::create_dir_all(parent); 
+        }
         if let Err(e) = init_background_tasks(db_path.to_string_lossy().to_string()) {
             eprintln!("Failed to init cache DB: {}", e);
         }

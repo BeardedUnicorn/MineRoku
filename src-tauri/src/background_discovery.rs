@@ -6,37 +6,37 @@ use std::{collections::{HashMap, HashSet}, sync::Mutex, time::{Duration, Instant
 use tauri::{AppHandle, Emitter};
 use url::Url;
 use chrono::Utc;
-use crate::background::{cache_device_bg, DeviceCache as CacheDevice};
+use crate::background::{cache_device_bg, DeviceCache};
+use crate::commands::{extract_device_info, generate_hardware_id, scan_network_for_roku};
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize)]
 pub struct RokuDeviceEvent {
     pub name: String,
     pub ip: String,
     pub port: u16,
     pub url: String,
+    pub hardware_id: String,
 }
 
-// Track by USN: value is (ip, last_seen)
-static LAST_SEEN: Lazy<Mutex<HashMap<String, (String, Instant)>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+// Track devices by hardware ID: value is (device_info, last_seen)
+static LAST_SEEN: Lazy<Mutex<HashMap<String, (RokuDeviceEvent, Instant)>>> = 
+    Lazy::new(|| Mutex::new(HashMap::new()));
 
-/// Run a single discovery cycle, emitting events and updating the cache.
+/// Run a single discovery cycle, collecting ALL devices found
 pub async fn run_discovery_once(app: &AppHandle) -> Result<Vec<RokuDeviceEvent>, String> {
     let search_target = SearchTarget::Custom("roku".into(), "ecp".into());
-    let _ = app.emit("discovery_cycle_start", &());
+    let _ = app.emit("discovery_cycle_start", ());
 
     log::info!("Starting SSDP discovery for Roku devices");
     log::info!("Search target: {:?}", search_target);
 
-    // Use longer timeout on Android
     #[cfg(target_os = "android")]
     let search_timeout = Duration::from_secs(10);
     #[cfg(not(target_os = "android"))]
-    let search_timeout = Duration::from_secs(3);
+    let search_timeout = Duration::from_secs(5);
 
     log::info!("Using search timeout: {:?}", search_timeout);
 
-    // Try SSDP discovery
     let mut responses = match search(&search_target, search_timeout, 5, Some(4)).await {
         Ok(s) => {
             log::info!("SSDP search initiated successfully");
@@ -44,13 +44,13 @@ pub async fn run_discovery_once(app: &AppHandle) -> Result<Vec<RokuDeviceEvent>,
         }
         Err(e) => {
             log::error!("SSDP search initialization error: {}", e);
-            let _ = app.emit("discovery_cycle_end", &());
+            let _ = app.emit("discovery_cycle_end", Vec::<RokuDeviceEvent>::new());
             return Err(e.to_string());
         }
     };
 
-    let mut seen_this_cycle: HashSet<String> = HashSet::new();
-    let mut discovered: Vec<RokuDeviceEvent> = Vec::new();
+    let mut discovered_devices: Vec<RokuDeviceEvent> = Vec::new();
+    let mut seen_hardware_ids: HashSet<String> = HashSet::new();
     let mut response_count = 0;
 
     log::info!("Waiting for SSDP responses...");
@@ -61,7 +61,8 @@ pub async fn run_discovery_once(app: &AppHandle) -> Result<Vec<RokuDeviceEvent>,
         
         let resp = match resp_res {
             Ok(r) => {
-                log::info!("Got valid SSDP response: ST={:?}, Location={}", r.search_target(), r.location());
+                log::info!("Got valid SSDP response: ST={:?}, Location={}", 
+                         r.search_target(), r.location());
                 if r.search_target() == &search_target {
                     r
                 } else {
@@ -84,112 +85,121 @@ pub async fn run_discovery_once(app: &AppHandle) -> Result<Vec<RokuDeviceEvent>,
                 continue;
             }
         };
-        let origin = desc_url.origin().ascii_serialization();
-        let usn = resp.usn().to_string();
-        let info_url = format!("{}/query/device-info", origin);
-
-        log::info!("Fetching device info from: {}", info_url);
-
-        // Fetch friendly name best-effort; fall back to origin.
-        let friendly = match reqwest::Client::builder()
-            .timeout(Duration::from_secs(5))
-            .build()
-            .unwrap_or_default()
-            .get(&info_url)
-            .send()
-            .await
-        {
-            Ok(resp) if resp.status().is_success() => {
-                let body = resp.text().await.unwrap_or_default();
-                log::debug!("Device info response length: {} bytes", body.len());
-                if let (Some(s), Some(e)) = (
-                    body.find("<friendly-device-name>"),
-                    body.find("</friendly-device-name>"),
-                ) {
-                    let s = s + "<friendly-device-name>".len();
-                    let name = body[s..e].to_string();
-                    log::info!("Extracted device name: {}", name);
-                    name
-                } else {
-                    log::warn!("Could not find friendly-device-name in response");
-                    origin.clone()
-                }
-            }
-            Ok(resp) => {
-                log::warn!("Device info request returned status: {}", resp.status());
-                origin.clone()
-            }
-            Err(e) => {
-                log::warn!("Failed to fetch device info from {}: {}", info_url, e);
-                origin.clone()
-            }
-        };
 
         let ip = desc_url.host_str().unwrap_or_default().to_string();
         let port = desc_url.port_or_known_default().unwrap_or(8060);
 
-        log::info!("Successfully discovered Roku device: '{}' at {}:{}", friendly, ip, port);
+        log::info!("Fetching device info from: {}:{}", ip, port);
 
-        let evt = RokuDeviceEvent { name: friendly, ip: ip.clone(), port, url: origin.clone() };
-        discovered.push(evt.clone());
-        let _ = app.emit("device_discovered", &evt);
-        
-        // Persist discovery to cache with last_seen
-        match cache_device_bg(CacheDevice {
-            name: evt.name.clone(),
-            ip: evt.ip.clone(),
-            port: evt.port,
-            url: evt.url.clone(),
-            last_seen: Utc::now().timestamp(),
-        }).await {
-            Ok(_) => log::debug!("Cached device: {}", evt.name),
-            Err(e) => log::warn!("Failed to cache device: {}", e),
+        match extract_device_info(&ip, port).await {
+            Ok(details) => {
+                let hardware_id = generate_hardware_id(&details);
+                
+                // Skip duplicates within this cycle
+                if seen_hardware_ids.contains(&hardware_id) {
+                    log::info!("Skipping duplicate device with hardware_id: {}", hardware_id);
+                    continue;
+                }
+                
+                seen_hardware_ids.insert(hardware_id.clone());
+                
+                let evt = RokuDeviceEvent {
+                    name: details.friendly_name,
+                    ip: ip.clone(),
+                    port,
+                    url: desc_url.origin().ascii_serialization(),
+                    hardware_id: hardware_id.clone(),
+                };
+                
+                log::info!("Discovered Roku device: '{}' at {}:{} (hw_id: {})", 
+                         evt.name, evt.ip, evt.port, evt.hardware_id);
+                
+                discovered_devices.push(evt.clone());
+                let _ = app.emit("device_discovered", &evt);
+                
+                // Update tracking
+                let now = Instant::now();
+                LAST_SEEN.lock().unwrap().insert(hardware_id.clone(), (evt.clone(), now));
+                
+                // Persist to cache
+                match cache_device_bg(DeviceCache {
+                    name: evt.name.clone(),
+                    ip: evt.ip.clone(),
+                    port: evt.port,
+                    url: evt.url.clone(),
+                    hardware_id: evt.hardware_id.clone(),
+                    last_seen: Utc::now().timestamp(),
+                }).await {
+                    Ok(_) => log::debug!("Cached device: {}", evt.name),
+                    Err(e) => log::warn!("Failed to cache device: {}", e),
+                }
+            }
+            Err(e) => {
+                log::warn!("Failed to get device info for {}:{}: {}", ip, port, e);
+            }
         }
-
-        let now = Instant::now();
-        seen_this_cycle.insert(usn.clone());
-        LAST_SEEN.lock().unwrap().insert(usn, (ip.clone(), now));
     }
 
-    log::info!("SSDP discovery complete. Found {} devices from {} responses", discovered.len(), response_count);
+    log::info!("SSDP discovery complete. Found {} unique devices from {} responses", 
+              discovered_devices.len(), response_count);
 
-    if discovered.is_empty() && response_count == 0 {
-        log::warn!("No SSDP responses received at all - possible network/multicast issue");
+    // If SSDP found nothing, try subnet scan fallback
+    if discovered_devices.is_empty() && response_count == 0 {
+        log::warn!("No SSDP responses received - trying subnet scan fallback");
+        
+        if let Ok(fallback_devices) = scan_network_for_roku().await {
+            for device in fallback_devices {
+                if !seen_hardware_ids.contains(&device.hardware_id) {
+                    seen_hardware_ids.insert(device.hardware_id.clone());
+                    
+                    let evt = RokuDeviceEvent {
+                        name: device.name,
+                        ip: device.ip,
+                        port: device.port,
+                        url: device.url,
+                        hardware_id: device.hardware_id.clone(),
+                    };
+                    
+                    discovered_devices.push(evt.clone());
+                    let _ = app.emit("device_discovered", &evt);
+                    
+                    LAST_SEEN.lock().unwrap().insert(
+                        device.hardware_id, 
+                        (evt, Instant::now())
+                    );
+                }
+            }
+        }
     }
 
-    // Determine devices that have gone missing
+    // Determine devices that have gone missing (by hardware ID)
     let cutoff = Instant::now() - Duration::from_secs(60);
-    let mut to_remove: Vec<String> = vec![];
-    let mut to_remove_usn: Vec<String> = vec![];
+    let mut lost_hardware_ids: Vec<String> = vec![];
     {
         let map = LAST_SEEN.lock().unwrap();
-        for (usn, (ip, last)) in map.iter() {
-            if *last < cutoff && !seen_this_cycle.contains(usn) {
-                to_remove.push(ip.clone());
-                to_remove_usn.push(usn.clone());
+        for (hw_id, (_device, last)) in map.iter() {
+            if *last < cutoff && !seen_hardware_ids.contains(hw_id) {
+                lost_hardware_ids.push(hw_id.clone());
             }
         }
     }
     
-    if !to_remove.is_empty() {
-        log::info!("Marking {} devices as lost", to_remove.len());
-    }
-    
-    for ip in to_remove {
-        let _ = app.emit("device_lost", &ip);
-    }
-    if !to_remove_usn.is_empty() {
+    if !lost_hardware_ids.is_empty() {
+        log::info!("Marking {} devices as lost", lost_hardware_ids.len());
         let mut map = LAST_SEEN.lock().unwrap();
-        for usn in to_remove_usn { let _ = map.remove(&usn); }
+        for hw_id in lost_hardware_ids {
+            if let Some((device, _)) = map.remove(&hw_id) {
+                let _ = app.emit("device_lost", &device);
+            }
+        }
     }
 
-    let _ = app.emit("discovery_cycle_end", &());
-    Ok(discovered)
+    let _ = app.emit("discovery_cycle_end", &discovered_devices);
+    Ok(discovered_devices)
 }
 
 pub fn start_background_discovery(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
-        // Give Android time to acquire multicast lock
         #[cfg(target_os = "android")]
         {
             log::info!("Android: Waiting 3 seconds for multicast lock acquisition...");

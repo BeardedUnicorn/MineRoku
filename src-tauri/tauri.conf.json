@@ -18,6 +18,7 @@
       {
         "title": "Roku Remote",
         "label": "main",
+        "maximized": true,
         "fullscreen": false,
         "resizable": true,
         "width": 1000,

@@ -33,14 +33,7 @@ import {
   powerButtonSpecs,
 } from './RemoteButtonSpecs';
 import MediaPlayerModal from './MediaPlayerModal';
-
-export interface RokuDevice {
-  name: string;
-  ip: string;
-  port: number;
-  url: string;
-  status?: 'connected' | 'connecting' | 'disconnected';
-}
+import { RokuDevice } from '../store';
 
 interface ActiveApp {
   name: string;
@@ -230,7 +223,7 @@ const ActiveAppIcon: React.FC<{ device: RokuDevice; app: ActiveApp }> = ({ devic
         };
 
         loadIcon();
-    }, [device.ip, app.id]);
+    }, [device.ip, device.port, app]);
 
     if (!app || app.id === 'roku' || !icon) return null;
 
@@ -263,15 +256,12 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
         const p = await platform();
         setCurrentPlatform(p);
       } catch {
-        // If permission is not granted (e.g., in popup window) or plugin unavailable,
-        // fall back gracefully without breaking the UI.
         setCurrentPlatform(null);
       }
     };
     fetchPlatform();
   }, []);
 
-  // Helper functions for time parsing and formatting
   const parseTime = (timeStr?: string): number => {
     if (!timeStr) return 0;
     const match = timeStr.match(/(\d+)/);
@@ -293,17 +283,15 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
   useEffect(() => {
     if (!device) return;
     
-    // Cancel any previous fetch
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
     
-    const currentKey = `${device.ip}:${device.port}`;
+    const currentKey = `${device.hardware_id}`;
     const isSameDevice = lastDeviceKeyRef.current === currentKey;
     lastDeviceKeyRef.current = currentKey;
 
     const initialFetch = async () => {
-      // Create new abort controller for this fetch
       const abortController = new AbortController();
       abortControllerRef.current = abortController;
 
@@ -330,7 +318,6 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
           port: device.port,
         });
         
-        // Check if this fetch was aborted
         if (abortController.signal.aborted) {
           return;
         }
@@ -359,13 +346,12 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
 
     initialFetch();
 
-    // Cleanup function
     return () => {
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
       }
     };
-  }, [device.ip, device.port, device.status]);
+  }, [device.hardware_id, device.ip, device.port, device.status]);
 
   useEffect(() => {
     if (!device) return;
@@ -382,8 +368,8 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
           port: device.port
         });
         setActiveApp(appInfo);
-      } catch (error) {
-        // Avoid spamming logs when device briefly unreachable; ignore here.
+      } catch {
+        // Ignore errors during polling
       }
     };
 
@@ -398,9 +384,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
           port: device.port
         });
         setMediaInfo(info);
-      } catch (error) {
-        // Media player info might not be available when not playing content
-        // This is expected, so we don't log errors
+      } catch {
         setMediaInfo(null);
       }
     };
@@ -412,7 +396,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
     const startPolling = () => {
       if (intervalId) return;
       fetchAll();
-      intervalId = window.setInterval(fetchAll, 2000); // Poll every 2 seconds for smoother progress updates
+      intervalId = window.setInterval(fetchAll, 2000);
     };
 
     const stopPolling = () => {
@@ -471,7 +455,6 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
   );
 
   useEffect(() => {
-    // Skip keyboard shortcuts on mobile
     if (currentPlatform === 'android' || currentPlatform === 'ios') {
         return;
     }
@@ -486,7 +469,6 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
     };
 
     const handler = (e: KeyboardEvent) => {
-      // Do not intercept keys while typing in inputs/text areas.
       if (isEditableTarget(e.target)) return;
       const key = e.key.toLowerCase();
       switch (key) {
@@ -547,7 +529,6 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
   const playbackButtons = useMemo<CommandSpec[]>(() => playbackButtonSpecs, []);
   const powerButtons = useMemo<CommandSpec[]>(() => powerButtonSpecs, []);
 
-  // Calculate progress for the progress bar
   const position = parseTime(mediaInfo?.position);
   const duration = parseTime(mediaInfo?.duration);
   const progress = duration > 0 ? (position / duration) * 100 : 0;
@@ -633,7 +614,6 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
           )}
         </Box>
 
-        {/* Progress Bar Section */}
         {showProgress && (
           <Box sx={{mt: 1.5 }}>
             <LinearProgress
@@ -779,6 +759,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
 
 function devicesEqual(a: RokuDevice, b: RokuDevice) {
   return (
+    a.hardware_id === b.hardware_id &&
     a.ip === b.ip &&
     a.port === b.port &&
     a.name === b.name &&

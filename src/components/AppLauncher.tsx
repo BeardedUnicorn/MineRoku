@@ -27,7 +27,6 @@ import {
 import { useAppStore, RokuDevice } from '../store';
 import { iconCache, ICON_CACHE_TTL_MS, ICON_CACHE_LIMIT } from '../iconCache';
 
-// Updated interface: `app_type` has been removed to match the backend struct.
 interface RokuApp {
     id: string;
     name: string;
@@ -37,10 +36,6 @@ interface RokuApp {
 interface AppLauncherProps {
     device: RokuDevice;
 }
-
-// Cache to store loaded app icons and avoid refetching
-// Uses a composite key of `${ip}:${appId}` to scope icons per device
-// and includes a simple size limit to prevent unbounded growth.
 
 const AppIcon: React.FC<{ device: RokuDevice; appId: string; appName: string; size?: number }> = ({ device, appId, appName, size = 120 }) => {
     const cacheKey = `${device.ip}:${appId}`;
@@ -109,10 +104,11 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
     const [feedback, setFeedback] = useState<{ message: string; severity: 'success' | 'error' } | null>(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [currentPage, setCurrentPage] = useState(1);
-    const ITEMS_PER_PAGE = 4; // Increased items per page for a better grid view
+    const ITEMS_PER_PAGE = 4;
 
+    // Use hardware_id for favorites
     const { favoriteApps, toggleFavoriteApp } = useAppStore((state) => ({
-        favoriteApps: state.favoriteApps[device.ip] || [],
+        favoriteApps: state.favoriteApps[device.hardware_id] || [],
         toggleFavoriteApp: state.toggleFavoriteApp,
     }));
 
@@ -129,20 +125,17 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
                 port: device.port,
             });
             
-            // If we get an empty response and haven't retried yet, try once more after a delay
             if (rokuApps.length === 0 && retryCount === 0) {
                 console.log('No apps found, retrying in 2 seconds...');
                 setTimeout(() => fetchApps(1), 2000);
                 return;
             }
             
-            // Sort apps alphabetically by name
             setApps(rokuApps.sort((a, b) => a.name.localeCompare(b.name)));
         } catch (error) {
             console.error('Error fetching apps:', error);
             const errorMessage = typeof error === 'string' ? error : 'An unknown error occurred.';
             
-            // If it's a parse error and we haven't retried, try again
             if (errorMessage.includes('parse') && retryCount === 0) {
                 console.log('Parse error encountered, retrying in 2 seconds...');
                 setTimeout(() => fetchApps(1), 2000);
@@ -165,7 +158,7 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
             await invoke('launch_roku_app', {
                 ip: device.ip,
                 port: device.port,
-                appId,  // Fixed: was `app_id: appId`
+                appId,
             });
             setFeedback({ message: `Launched "${appName}"`, severity: 'success' });
         } catch (error) {
@@ -177,7 +170,6 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
         }
     };
     
-    // Reset page number when search term changes
     useEffect(() => {
         setCurrentPage(1);
     }, [searchTerm]);
@@ -185,7 +177,7 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
     useEffect(() => {
         if (!device) return;
 
-        // 1) Load cached apps immediately for fast UI
+        // Load cached apps immediately
         (async () => {
             try {
                 const cached: RokuApp[] = await invoke('get_cached_apps', { ip: device.ip });
@@ -194,25 +186,25 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
                 } else {
                     setApps([]);
                 }
-            } catch (e) {
-                // Non-fatal; fall back to live fetch below
+            } catch {
+                // Non-fatal; fall back to live fetch
             }
         })();
 
-        // 2) Fetch live apps only when device is connected; replaces cached results and persists
+        // Fetch live apps when device is connected
         if (!device.status || device.status === 'connected') {
             fetchApps();
         }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [device]);
+    }, [device.ip, device.port, device.status]);
 
-    // Filtering is now based only on the search term
     const filteredApps = apps.filter(app =>
         app.name.toLowerCase().includes(searchTerm.toLowerCase())
     );
 
     const pageCount = Math.ceil(filteredApps.length / ITEMS_PER_PAGE);
     const paginatedApps = filteredApps.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
+    
     const handlePageChange = (_event: React.ChangeEvent<unknown>, value: number) => {
         setCurrentPage(value);
     };
@@ -223,7 +215,7 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
 
     const favoriteAppDetails = favoriteApps
         .map(favId => apps.find(app => app.id === favId))
-        .filter((app): app is RokuApp => !!app); // Type guard to filter out undefined
+        .filter((app): app is RokuApp => !!app);
 
     return (
         <Box>
@@ -306,7 +298,7 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
                                             {isLaunching === app.id ? 'Launching...' : 'Launch'}
                                         </Button>
                                         <Tooltip title={favoriteApps.includes(app.id) ? "Remove from favorites" : "Add to favorites"}>
-                                            <IconButton onClick={() => toggleFavoriteApp(device.ip, app.id)}>
+                                            <IconButton onClick={() => toggleFavoriteApp(device.hardware_id, app.id)}>
                                                 {favoriteApps.includes(app.id) ? <StarIcon color="primary" /> : <StarBorderIcon />}
                                             </IconButton>
                                         </Tooltip>
@@ -355,8 +347,8 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
     );
 };
 
-// Avoid re-render when the same device endpoint is passed with identical fields
 export default React.memo(AppLauncher, (prev, next) => (
+  prev.device.hardware_id === next.device.hardware_id &&
   prev.device.ip === next.device.ip &&
   prev.device.port === next.device.port &&
   prev.device.name === next.device.name &&

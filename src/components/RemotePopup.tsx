@@ -12,18 +12,14 @@ const RemotePopup: React.FC = () => {
         let unlisten: (() => void) | undefined;
 
         const setupListener = async () => {
-            // Listen for the 'device-changed' event from the main window
             unlisten = await listen<RokuDevice | null>('device-changed', (event) => {
                 setSelectedDevice(event.payload);
             });
         };
 
         setupListener();
-        
-        // When the popup opens, ask the main window for the current device
         emit('popup-ready');
 
-        // Cleanup on unmount
         return () => {
             if (unlisten) {
                 unlisten();

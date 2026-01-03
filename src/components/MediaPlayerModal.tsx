@@ -24,6 +24,7 @@ import {
     LiveTv as LiveIcon,
     Error as ErrorIcon,
 } from '@mui/icons-material';
+import { RokuDevice } from '../store';
 
 interface MediaPlayerInfo {
     state: string;
@@ -50,11 +51,7 @@ interface MediaPlayerInfo {
 interface MediaPlayerModalProps {
     open: boolean;
     onClose: () => void;
-    device: {
-        ip: string;
-        port: number;
-        name: string;
-    };
+    device: RokuDevice;
 }
 
 const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({ open, onClose, device }) => {
@@ -76,10 +73,8 @@ const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({ open, onClose, devi
             setError(null);
         } catch (err) {
             console.error('Error fetching media player info:', err);
-            // Try to extract more details from the error
             let errorMessage = String(err);
             
-            // If it's a parse error, provide guidance
             if (errorMessage.includes('parse') || errorMessage.includes('XML')) {
                 errorMessage = `XML parsing error. The Roku device may not be playing content or doesn't support media-player queries. Original error: ${errorMessage}`;
             }
@@ -97,7 +92,6 @@ const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({ open, onClose, devi
             setError(null);
             fetchMediaPlayerInfo();
 
-            // Auto-refresh every 2 seconds while dialog is open
             const interval = setInterval(fetchMediaPlayerInfo, 2000);
             return () => clearInterval(interval);
         }
@@ -180,7 +174,6 @@ const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({ open, onClose, devi
 
         return (
             <Box>
-                {/* Player State */}
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3 }}>
                     <Chip
                         icon={mediaInfo.error ? <ErrorIcon /> : getStateIcon(mediaInfo.state)}
@@ -203,7 +196,6 @@ const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({ open, onClose, devi
                     )}
                 </Box>
 
-                {/* Progress Bar */}
                 {!mediaInfo.is_live && duration > 0 && (
                     <Box sx={{ mb: 3 }}>
                         <LinearProgress
@@ -224,7 +216,6 @@ const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({ open, onClose, devi
 
                 <Divider sx={{ my: 2 }} />
 
-                {/* Media Format Information */}
                 {mediaInfo.format && (
                     <Box sx={{ mb: 2 }}>
                         <Typography variant="subtitle2" sx={{ mb: 1 }}>
@@ -277,7 +268,6 @@ const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({ open, onClose, devi
                     </Box>
                 )}
 
-                {/* Plugin Information */}
                 {mediaInfo.plugin && (
                     <Box>
                         <Typography variant="subtitle2" sx={{ mb: 1 }}>
