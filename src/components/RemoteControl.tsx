@@ -183,58 +183,70 @@ const CENTER_SIZE = 72;
 const GAP = 12;
 const DPAD_SIZE = CENTER_SIZE + ARROW_SIZE * 2 + GAP * 4;
 
-const ActiveAppIcon: React.FC<{ device: RokuDevice; app: ActiveApp }> = ({ device, app }) => {
-    const [icon, setIcon] = useState<string | null>(null);
-    const lastKeyRef = useRef<string | null>(null);
+const useActiveAppIcon = (device: RokuDevice, app: ActiveApp | null) => {
+  const [icon, setIcon] = useState<string | null>(null);
+  const lastKeyRef = useRef<string | null>(null);
 
-    useEffect(() => {
-        if (!app || app.id === 'roku') {
-            setIcon(null);
-            lastKeyRef.current = null;
-            return;
+  useEffect(() => {
+    if (!app || app.id === 'roku') {
+      setIcon(null);
+      lastKeyRef.current = null;
+      return;
+    }
+
+    const cacheKey = `${device.ip}:${app.id}`;
+    if (lastKeyRef.current === cacheKey) return;
+
+    const cached = iconCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < ICON_CACHE_TTL_MS) {
+      setIcon(cached.data);
+      lastKeyRef.current = cacheKey;
+      return;
+    } else if (cached) {
+      iconCache.delete(cacheKey);
+    }
+
+    let cancelled = false;
+    setIcon(null);
+
+    const loadIcon = async () => {
+      try {
+        const iconData: string = await invoke('get_app_icon', { ip: device.ip, port: device.port, appId: app.id });
+        if (cancelled) return;
+        iconCache.set(cacheKey, { data: iconData, timestamp: Date.now() });
+        if (iconCache.size > ICON_CACHE_LIMIT) {
+          const oldestKey = iconCache.keys().next().value as string;
+          iconCache.delete(oldestKey);
         }
+        setIcon(iconData);
+        lastKeyRef.current = cacheKey;
+      } catch (error) {
+        if (!cancelled) {
+          console.error(`Error fetching icon for ${app.name}:`, error);
+        }
+      }
+    };
 
-        const cacheKey = `${device.ip}:${app.id}`;
-        if (lastKeyRef.current === cacheKey) return;
+    loadIcon();
+    return () => {
+      cancelled = true;
+    };
+  }, [device.ip, device.port, app?.id]);
 
-        const loadIcon = async () => {
-            const cached = iconCache.get(cacheKey);
-            if (cached && Date.now() - cached.timestamp < ICON_CACHE_TTL_MS) {
-                setIcon(cached.data);
-                lastKeyRef.current = cacheKey;
-                return;
-            } else if (cached) {
-                iconCache.delete(cacheKey);
-            }
+  return icon;
+};
 
-            setIcon(null);
-            try {
-                const iconData: string = await invoke('get_app_icon', { ip: device.ip, port: device.port, appId: app.id });
-                iconCache.set(cacheKey, { data: iconData, timestamp: Date.now() });
-                if (iconCache.size > ICON_CACHE_LIMIT) {
-                    const oldestKey = iconCache.keys().next().value as string;
-                    iconCache.delete(oldestKey);
-                }
-                setIcon(iconData);
-                lastKeyRef.current = cacheKey;
-            } catch (error) {
-                console.error(`Error fetching icon for ${app.name}:`, error);
-            }
-        };
+const ActiveAppIcon: React.FC<{ app: ActiveApp; icon: string | null }> = ({ app, icon }) => {
+  if (app.id === 'roku' || !icon) return null;
 
-        loadIcon();
-    }, [device.ip, device.port, app]);
-
-    if (!app || app.id === 'roku' || !icon) return null;
-
-    return (
-        <Box
-            component="img"
-            src={icon}
-            sx={{ width: 24, height: 24, borderRadius: 1 }}
-            alt={`${app.name} icon`}
-        />
-    );
+  return (
+    <Box
+      component="img"
+      src={icon}
+      sx={{ width: 24, height: 24, borderRadius: 1 }}
+      alt={`${app.name} icon`}
+    />
+  );
 };
 
 const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
@@ -249,6 +261,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
   const busyRef = useRef<Set<string>>(new Set());
   const abortControllerRef = useRef<AbortController | null>(null);
   const [currentPlatform, setCurrentPlatform] = useState<string | null>(null);
+  const activeAppIcon = useActiveAppIcon(device, activeApp);
 
   useEffect(() => {
     const fetchPlatform = async () => {
@@ -524,6 +537,37 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
     return () => window.removeEventListener('keydown', handler);
   }, [sendCommand, currentPlatform]);
 
+  // Update Android media notification when app/media state changes
+  useEffect(() => {
+      if (currentPlatform !== 'android') return;
+      if (!device || !activeApp) return;
+      
+      const updateNotification = async () => {
+          try {
+              // Get icon URL if available
+              let iconUrl: string | undefined;
+              if (activeApp.id !== 'roku') {
+                  iconUrl = `http://${device.ip}:${device.port}/query/icon/${activeApp.id}`;
+              }
+              
+              const playing = mediaInfo?.state === 'play' && !mediaInfo?.error;
+              
+              await invoke('update_media_notification', {
+                  deviceName: device.name,
+                  deviceIp: device.ip,
+                  devicePort: device.port,
+                  appName: activeApp.name,
+                  isPlaying: playing,
+                  appIconUrl: iconUrl,
+              });
+          } catch (e) {
+              console.log('Failed to update media notification:', e);
+          }
+      };
+      
+      updateNotification();
+  }, [device, activeApp, mediaInfo, currentPlatform]);
+
   const systemButtons = useMemo<CommandSpec[]>(() => systemButtonSpecs, []);
   const volumeButtons = useMemo<CommandSpec[]>(() => volumeButtonSpecs, []);
   const playbackButtons = useMemo<CommandSpec[]>(() => playbackButtonSpecs, []);
@@ -534,6 +578,10 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
   const progress = duration > 0 ? (position / duration) * 100 : 0;
   const isPlaying = mediaInfo && mediaInfo.state === 'play' && !mediaInfo.error;
   const showProgress = mediaInfo && !mediaInfo.is_live && duration > 0 && (mediaInfo.state === 'play' || mediaInfo.state === 'pause');
+  const baseBackground = `linear-gradient(145deg, ${theme.palette.background.paper}, ${theme.palette.background.default})`;
+  const remoteBackground = activeAppIcon
+    ? `linear-gradient(145deg, rgba(12,12,12,0.7), rgba(12,12,12,0.92)), url(${activeAppIcon})`
+    : baseBackground;
 
   return (
     <Paper
@@ -550,7 +598,10 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
         flexDirection: 'column',
         alignItems: 'center',
         gap: { xs: 1.5, sm: 2 },
-        background: `linear-gradient(145deg, ${theme.palette.background.paper}, ${theme.palette.background.default})`,
+        backgroundImage: remoteBackground,
+        backgroundSize: activeAppIcon ? 'cover' : 'auto',
+        backgroundPosition: 'center',
+        backgroundRepeat: 'no-repeat',
         boxShadow: `
           inset 0 1px 2px rgba(255,255,255,0.06),
           0 6px 18px rgba(0,0,0,0.6)
@@ -602,7 +653,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
             <CircularProgress size={20} />
           ) : activeApp && activeApp.id !== 'roku' ? (
             <>
-              <ActiveAppIcon device={device} app={activeApp} />
+              <ActiveAppIcon app={activeApp} icon={activeAppIcon} />
               <Typography variant="body2" sx={{ fontWeight: 500 }} noWrap>
                 {activeApp.name}
               </Typography>

@@ -1,6 +1,7 @@
 package com.rokucontroller.remote
 
 import android.content.Context
+import android.content.IntentFilter
 import android.net.wifi.WifiManager
 import android.os.Bundle
 import android.os.Build
@@ -8,25 +9,36 @@ import android.Manifest
 import android.content.pm.PackageManager
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.annotation.Keep
 import java.net.Inet4Address
 import java.net.NetworkInterface
 
 class MainActivity : TauriActivity() {
     private var multicastLock: WifiManager.MulticastLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
+    private var mediaSessionManager: MediaSessionManager? = null
+    private var mediaControlReceiver: MediaControlReceiver? = null
 
     companion object {
         private const val PERMISSION_REQUEST_CODE = 1001
+        
+        // Static reference for Tauri commands to access
+        @Volatile
+        var currentInstance: MainActivity? = null
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        currentInstance = this
         requestPermissionsIfNeeded()
+        initMediaSession()
+        registerMediaReceiver()
     }
 
     override fun onResume() {
         super.onResume()
         acquireLocks()
+        mediaSessionManager?.showNotification()
     }
 
     override fun onPause() {
@@ -35,8 +47,49 @@ class MainActivity : TauriActivity() {
     }
 
     override fun onDestroy() {
+        currentInstance = null
+        unregisterMediaReceiver()
+        mediaSessionManager?.release()
         releaseLocks()
         super.onDestroy()
+    }
+    
+    private fun initMediaSession() {
+        mediaSessionManager = MediaSessionManager.getInstance(this)
+    }
+    
+    private fun registerMediaReceiver() {
+        mediaControlReceiver = MediaControlReceiver()
+        val filter = IntentFilter("com.rokucontroller.remote.MEDIA_ACTION")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(mediaControlReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(mediaControlReceiver, filter)
+        }
+    }
+    
+    private fun unregisterMediaReceiver() {
+        mediaControlReceiver?.let {
+            try {
+                unregisterReceiver(it)
+            } catch (e: Exception) {
+                android.util.Log.e("RokuRemote", "Failed to unregister receiver: ${e.message}")
+            }
+        }
+    }
+    
+    // Called from Tauri/Rust via JNI or events
+    @Keep
+    fun updateMediaSession(deviceName: String, deviceIp: String, devicePort: Int, appName: String, isPlaying: Boolean, appIconUrl: String?) {
+        runOnUiThread {
+            mediaSessionManager?.updateDevice(deviceName, deviceIp, devicePort)
+            mediaSessionManager?.updateMediaInfo(appName, isPlaying, appIconUrl)
+        }
+    }
+    
+    @Keep
+    fun hideMediaNotification() {
+        runOnUiThread { mediaSessionManager?.hideNotification() }
     }
 
     private fun requestPermissionsIfNeeded() {
@@ -55,6 +108,14 @@ class MainActivity : TauriActivity() {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.NEARBY_WIFI_DEVICES) 
                 != PackageManager.PERMISSION_GRANTED) {
                 permissionsNeeded.add(Manifest.permission.NEARBY_WIFI_DEVICES)
+            }
+        }
+        
+        // POST_NOTIFICATIONS for Android 13+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) 
+                != PackageManager.PERMISSION_GRANTED) {
+                permissionsNeeded.add(Manifest.permission.POST_NOTIFICATIONS)
             }
         }
 
