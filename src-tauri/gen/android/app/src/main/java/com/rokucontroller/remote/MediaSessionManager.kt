@@ -288,7 +288,7 @@ class MediaSessionManager(private val context: Context) {
         
         val mediaStyle = MediaStyle()
             .setMediaSession(mediaSession?.sessionToken)
-            .setShowActionsInCompactView(0, 1, 2) // rewind, play/pause, forward
+            .setShowActionsInCompactView(0, 1, 2) // vol-, play/pause, vol+
         
         val title = if (currentDeviceName.isBlank()) "Roku" else currentDeviceName
         val contentText = if (lastActionLabel.isNullOrBlank()) {
@@ -314,11 +314,11 @@ class MediaSessionManager(private val context: Context) {
         }
         
         // Add media control actions
-        // Rewind
+        // Volume Down
         builder.addAction(
-            android.R.drawable.ic_media_rew,
-            "Rewind",
-            createMediaActionPendingIntent("rev")
+            android.R.drawable.ic_lock_silent_mode,
+            "Vol-",
+            createMediaActionPendingIntent("VolumeDown")
         )
         
         // Play/Pause
@@ -328,6 +328,20 @@ class MediaSessionManager(private val context: Context) {
             playPauseIcon,
             playPauseTitle,
             createMediaActionPendingIntent("play_pause")
+        )
+        
+        // Volume Up  
+        builder.addAction(
+            android.R.drawable.ic_lock_silent_mode_off,
+            "Vol+",
+            createMediaActionPendingIntent("VolumeUp")
+        )
+
+        // Rewind
+        builder.addAction(
+            android.R.drawable.ic_media_rew,
+            "Rewind",
+            createMediaActionPendingIntent("rev")
         )
         
         // Forward
@@ -342,20 +356,6 @@ class MediaSessionManager(private val context: Context) {
             android.R.drawable.ic_delete,
             "Home",
             createMediaActionPendingIntent("home")
-        )
-        
-        // Volume Down
-        builder.addAction(
-            android.R.drawable.ic_lock_silent_mode,
-            "Vol-",
-            createMediaActionPendingIntent("VolumeDown")
-        )
-        
-        // Volume Up  
-        builder.addAction(
-            android.R.drawable.ic_lock_silent_mode_off,
-            "Vol+",
-            createMediaActionPendingIntent("VolumeUp")
         )
         
         return builder.build()

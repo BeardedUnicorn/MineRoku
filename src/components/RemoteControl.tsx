@@ -550,7 +550,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
                   iconUrl = `http://${device.ip}:${device.port}/query/icon/${activeApp.id}`;
               }
               
-              const playing = mediaInfo?.state === 'play' && !mediaInfo?.error;
+              const playing = mediaInfo?.state?.toLowerCase() === 'play' || mediaInfo?.state?.toLowerCase() === 'playing';
               
               await invoke('update_media_notification', {
                   deviceName: device.name,
@@ -576,8 +576,9 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
   const position = parseTime(mediaInfo?.position);
   const duration = parseTime(mediaInfo?.duration);
   const progress = duration > 0 ? (position / duration) * 100 : 0;
-  const isPlaying = mediaInfo && mediaInfo.state === 'play' && !mediaInfo.error;
-  const showProgress = mediaInfo && !mediaInfo.is_live && duration > 0 && (mediaInfo.state === 'play' || mediaInfo.state === 'pause');
+  const mediaState = mediaInfo?.state?.toLowerCase() ?? '';
+  const isPlaying = mediaState === 'play' || mediaState === 'playing';
+  const showProgress = mediaInfo && !mediaInfo.is_live && duration > 0 && (mediaState === 'play' || mediaState === 'pause');
   const baseBackground = `linear-gradient(145deg, ${theme.palette.background.paper}, ${theme.palette.background.default})`;
   const remoteBackground = activeAppIcon
     ? `linear-gradient(145deg, rgba(12,12,12,0.7), rgba(12,12,12,0.92)), url(${activeAppIcon})`
