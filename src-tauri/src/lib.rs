@@ -10,7 +10,7 @@ use tauri::Manager;
 
 use commands::{
     discover_roku_devices_impl, get_active_app_impl, get_app_icon_impl, launch_roku_app_impl,
-    list_roku_apps_impl, open_popup_window_impl, send_roku_command_impl, test_network_connectivity, 
+    list_roku_apps_impl, send_roku_command_impl, test_network_connectivity, 
     ActiveAppInfo, RokuApp, get_media_player_impl, MediaPlayerInfo, RokuDevice,
 };
 
@@ -54,9 +54,63 @@ async fn get_app_icon(ip: String, port: u16, app_id: String) -> Result<String, S
     get_app_icon_impl(ip, port, app_id).await
 }
 
+#[cfg(target_os = "android")]
 #[command]
-fn open_popup_window(app: tauri::AppHandle) -> Result<(), String> {
-    open_popup_window_impl(&app)
+fn update_media_notification(
+    _app: tauri::AppHandle,
+    device_name: String,
+    device_ip: String,
+    device_port: u16,
+    app_name: String,
+    is_playing: bool,
+    app_icon_url: Option<String>,
+) -> Result<(), String> {
+    use jni::objects::{JObject, JValue};
+    use jni::JavaVM;
+    
+    let context = ndk_context::android_context();
+    let vm = unsafe { JavaVM::from_raw(context.vm().cast()) }.map_err(|e| e.to_string())?;
+    let mut env = vm.attach_current_thread().map_err(|e| e.to_string())?;
+    
+    let j_device_name = env.new_string(&device_name).map_err(|e| e.to_string())?;
+    let j_device_ip = env.new_string(&device_ip).map_err(|e| e.to_string())?;
+    let j_app_name = env.new_string(&app_name).map_err(|e| e.to_string())?;
+    let j_app_icon_url = if let Some(ref url) = app_icon_url {
+        env.new_string(url).map_err(|e| e.to_string())?
+    } else {
+        env.new_string("").map_err(|e| e.to_string())?
+    };
+    
+    let activity_obj = unsafe { JObject::from_raw(context.context() as jni::sys::jobject) };
+    
+    env.call_method(
+        activity_obj,
+        "updateMediaSession",
+        "(Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;ZLjava/lang/String;)V",
+        &[
+            JValue::Object(&j_device_name),
+            JValue::Object(&j_device_ip),
+            JValue::Int(device_port as i32),
+            JValue::Object(&j_app_name),
+            JValue::Bool(if is_playing { 1 } else { 0 }),
+            JValue::Object(&j_app_icon_url),
+        ],
+    ).map_err(|e| e.to_string())?;
+    
+    Ok(())
+}
+
+#[cfg(not(target_os = "android"))]
+#[command]
+fn update_media_notification(
+    _device_name: String,
+    _device_ip: String,
+    _device_port: u16,
+    _app_name: String,
+    _is_playing: bool,
+    _app_icon_url: Option<String>,
+) -> Result<(), String> {
+    Ok(())
 }
 
 #[cfg(desktop)]
@@ -121,11 +175,11 @@ pub fn run() {
             get_app_icon,
             get_media_player,
             test_network_connectivity,
-            open_popup_window,
             get_cached_devices,
             get_cached_apps,
             clear_all_data,
-            restart_app
+            restart_app,
+            update_media_notification
         ]);
 
     #[cfg(desktop)]

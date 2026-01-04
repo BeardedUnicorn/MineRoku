@@ -45,3 +45,5 @@ ssdp-client = { path = "../crates/ssdp-client" }
 
 [target.'cfg(target_os = "android")'.dependencies]
 android_logger = "0.13"
+jni = "0.21"
+ndk-context = "0.1"
