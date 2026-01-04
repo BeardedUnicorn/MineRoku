@@ -1,7 +1,9 @@
 import React from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { platform } from '@tauri-apps/plugin-os';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { useAppStore, RokuDevice } from '../store';
+import { iconCache } from '../iconCache';
 import { shallow } from 'zustand/shallow';
 import {
     Drawer, List, ListItemButton, ListItemText,
@@ -12,7 +14,6 @@ import {
     Refresh as RefreshIcon,
     Settings as SettingsIcon,
     Info as InfoIcon,
-    Add as AddIcon,
     DeleteForever as DeleteForeverIcon
 } from '@mui/icons-material';
 
@@ -33,11 +34,25 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, scanForDevices, isS
     const setPreferLastUsed = useAppStore((s) => s.setPreferLastUsed);
     const showAllDevices = useAppStore((s) => s.showAllDevices);
     const setShowAllDevices = useAppStore((s) => s.setShowAllDevices);
+    const resetState = useAppStore((s) => s.resetState);
     const theme = useTheme();
     const isMobile = useMediaQuery(theme.breakpoints.down('md'));
     const [settingsOpen, setSettingsOpen] = React.useState(false);
     const [confirmDeleteOpen, setConfirmDeleteOpen] = React.useState(false);
     const [isDeleting, setIsDeleting] = React.useState(false);
+    const [currentPlatform, setCurrentPlatform] = React.useState<string | null>(null);
+
+    React.useEffect(() => {
+        const fetchPlatform = async () => {
+            try {
+                const p = await platform();
+                setCurrentPlatform(p);
+            } catch {
+                setCurrentPlatform(null);
+            }
+        };
+        fetchPlatform();
+    }, []);
 
     const handleDeviceSelect = (device: RokuDevice) => {
         setSelectedDevice(device);
@@ -46,35 +61,45 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, scanForDevices, isS
         }
     };
 
-    const openPopupWindow = () => {
-        invoke('open_popup_window');
-    };
-
     const handleDeleteAllData = async () => {
         setIsDeleting(true);
         try {
             // Clear backend database
             await invoke('clear_all_data');
-            
-            // Clear frontend localStorage
-            localStorage.removeItem('roku-remote-storage');
-            
-            // Clear any other localStorage items that might exist
-            const keysToRemove: string[] = [];
-            for (let i = 0; i < localStorage.length; i++) {
-                const key = localStorage.key(i);
-                if (key && key.startsWith('roku')) {
-                    keysToRemove.push(key);
-                }
-            }
-            keysToRemove.forEach(key => localStorage.removeItem(key));
-            
-            // Restart the app
-            await invoke('restart_app');
         } catch (error) {
             console.error('Failed to delete data:', error);
+        }
+        
+        // Clear frontend localStorage
+        localStorage.removeItem('roku-remote-storage');
+        
+        // Clear any other localStorage items that might exist
+        const keysToRemove: string[] = [];
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && key.startsWith('roku')) {
+                keysToRemove.push(key);
+            }
+        }
+        keysToRemove.forEach(key => localStorage.removeItem(key));
+
+        iconCache.clear();
+        useAppStore.persist.clearStorage();
+        resetState();
+        setConfirmDeleteOpen(false);
+        setSettingsOpen(false);
+
+        if (currentPlatform === 'android' || currentPlatform === 'ios') {
             setIsDeleting(false);
-            setConfirmDeleteOpen(false);
+            return;
+        }
+
+        try {
+            // Restart the app (desktop)
+            await invoke('restart_app');
+        } catch (error) {
+            console.error('Failed to restart app:', error);
+            setIsDeleting(false);
         }
     };
 
@@ -162,14 +187,6 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, scanForDevices, isS
                             <RefreshIcon />
                         </IconButton>
                     </span>
-                </Tooltip>
-                <Tooltip title="Open Remote in New Window">
-                    <IconButton
-                        aria-label="Open Remote in New Window"
-                        onClick={openPopupWindow}
-                    >
-                        <AddIcon />
-                    </IconButton>
                 </Tooltip>
                 <Tooltip title="Settings">
                     <IconButton

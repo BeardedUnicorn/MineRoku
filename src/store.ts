@@ -27,6 +27,7 @@ export interface AppState {
     toggleFavoriteApp: (hardwareId: string, appId: string) => void;
     setPreferLastUsed: (v: boolean) => void;
     setShowAllDevices: (v: boolean) => void;
+    resetState: () => void;
 }
 
 // Migration function to update old IP-based storage to hardware_id
@@ -86,15 +87,20 @@ if (typeof window !== 'undefined') {
 
 export const useAppStore = create<AppState>()(
     persist(
-        (set, get) => ({
-            devices: [],
-            selectedDevice: null,
-            favoriteApps: {},
-            preferLastUsed: true,
-            showAllDevices: true,
-            
-            setDevices: (devices) => set({ devices }),
-            setSelectedDevice: (device) => set({ selectedDevice: device }),
+        (set, get) => {
+            const initialState = {
+                devices: [],
+                selectedDevice: null,
+                favoriteApps: {},
+                preferLastUsed: true,
+                showAllDevices: true,
+            };
+
+            return {
+                ...initialState,
+                
+                setDevices: (devices) => set({ devices }),
+                setSelectedDevice: (device) => set({ selectedDevice: device }),
             
             updateDeviceStatus: (hardwareId, status) => {
                 set((state) => ({
@@ -226,9 +232,11 @@ export const useAppStore = create<AppState>()(
                 });
             },
             
-            setPreferLastUsed: (v) => set({ preferLastUsed: v }),
-            setShowAllDevices: (v) => set({ showAllDevices: v }),
-        }),
+                setPreferLastUsed: (v) => set({ preferLastUsed: v }),
+                setShowAllDevices: (v) => set({ showAllDevices: v }),
+                resetState: () => set({ ...initialState }),
+            };
+        },
         {
             name: 'roku-remote-storage',
             storage: createJSONStorage(() => localStorage),
