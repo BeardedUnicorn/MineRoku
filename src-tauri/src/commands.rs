@@ -6,8 +6,6 @@ use crate::background::{cache_app_list_bg, AppCache as CacheApp, get_icon_bg, ca
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, sync::Mutex, time::Duration};
 use tauri::AppHandle;
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
-use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 use url::Url;
 
 /// Shared HTTP client for discovery and manual requests.
@@ -663,31 +661,6 @@ pub async fn get_app_icon_impl(ip: String, port: u16, app_id: String) -> Result<
     ICON_CACHE.lock().unwrap().insert(url, data_url.clone());
 
     Ok(data_url)
-}
-
-/// Create or show the remote popup window.
-pub fn open_popup_window_impl(app: &AppHandle) -> Result<(), String> {
-    #[cfg(any(target_os = "android", target_os = "ios"))]
-    {
-        let _ = app;
-        return Ok(());
-    }
-    
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    {
-        if let Some(window) = app.get_webview_window("remote_popup") {
-            window.show().map_err(|e| e.to_string())?;
-            window.set_focus().map_err(|e| e.to_string())?;
-        } else {
-            WebviewWindowBuilder::new(app, "remote_popup", WebviewUrl::App("index.html".into()))
-                .title("Roku Remote")
-                .resizable(false)
-                .inner_size(400.0, 700.0)
-                .build()
-                .map_err(|e| e.to_string())?;
-        }
-        Ok(())
-    }
 }
 
 /// Test network connectivity on Android

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { emit, listen } from '@tauri-apps/api/event';
+import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
+import { platform } from '@tauri-apps/plugin-os';
 import Sidebar from './components/Sidebar';
 import RemoteControl from './components/RemoteControl';
 import AppLauncher from './components/AppLauncher';
@@ -48,25 +49,49 @@ const App: React.FC = () => {
     const [mobileView, setMobileView] = useState<'remote' | 'apps'>('remote');
     const [isScanning, setIsScanning] = useState(false);
     const [scanStatus, setScanStatus] = useState<string>('');
+    const [currentPlatform, setCurrentPlatform] = useState<string | null>(null);
     const theme = useTheme();
     const isMobile = useMediaQuery(theme.breakpoints.down('md'));
     const prefersReducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
 
     useEffect(() => {
+        const fetchPlatform = async () => {
+            try {
+                const p = await platform();
+                setCurrentPlatform(p);
+            } catch {
+                setCurrentPlatform(null);
+            }
+        };
+        fetchPlatform();
+    }, []);
+
+    useEffect(() => {
         setIsSidebarOpen(!isMobile);
     }, [isMobile]);
 
+    // Update Android media notification when device changes
     useEffect(() => {
-        const unlistenPromise = listen('popup-ready', () => {
-            emit('device-changed', selectedDevice);
-        });
-
-        emit('device-changed', selectedDevice);
-
-        return () => {
-            unlistenPromise.then(unlisten => unlisten());
+        if (currentPlatform !== 'android') return;
+        
+        const updateMediaNotification = async () => {
+            if (selectedDevice) {
+                try {
+                    await invoke('update_media_notification', {
+                        deviceName: selectedDevice.name,
+                        deviceIp: selectedDevice.ip,
+                        devicePort: selectedDevice.port,
+                        appName: 'Roku Remote',
+                        isPlaying: false,
+                    });
+                } catch (e) {
+                    console.log('Media notification update not available:', e);
+                }
+            }
         };
-    }, [selectedDevice]);
+        
+        updateMediaNotification();
+    }, [selectedDevice, currentPlatform]);
 
     const handleToggleSidebar = useCallback(() => {
         setIsSidebarOpen((v) => !v);

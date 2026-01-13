@@ -11,6 +11,11 @@
         android:usesPermissionFlags="neverForLocation" />
     <!-- Keep WiFi awake during discovery -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Foreground service for media controls -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <!-- Notifications for Android 13+ -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
@@ -36,6 +41,19 @@
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
         </activity>
+        
+        <receiver
+            android:name=".MediaControlReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.rokucontroller.remote.MEDIA_ACTION.play_pause" />
+                <action android:name="com.rokucontroller.remote.MEDIA_ACTION.rev" />
+                <action android:name="com.rokucontroller.remote.MEDIA_ACTION.fwd" />
+                <action android:name="com.rokucontroller.remote.MEDIA_ACTION.home" />
+                <action android:name="com.rokucontroller.remote.MEDIA_ACTION.VolumeUp" />
+                <action android:name="com.rokucontroller.remote.MEDIA_ACTION.VolumeDown" />
+            </intent-filter>
+        </receiver>
 
         <provider
           android:name="androidx.core.content.FileProvider"
