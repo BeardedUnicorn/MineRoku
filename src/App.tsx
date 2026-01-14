@@ -5,7 +5,7 @@ import { platform } from '@tauri-apps/plugin-os';
 import Sidebar from './components/Sidebar';
 import RemoteControl from './components/RemoteControl';
 import AppLauncher from './components/AppLauncher';
-import { Box, Typography, Paper, CircularProgress, AppBar, Toolbar, IconButton, useTheme, useMediaQuery, Button } from '@mui/material';
+import { Box, Typography, Paper, CircularProgress, AppBar, Toolbar, IconButton, useTheme, useMediaQuery, Button, Tooltip } from '@mui/material';
 import { motion } from 'framer-motion';
 import { Tv as TvIcon, SearchOff as SearchOffIcon, Menu as MenuIcon, Refresh as RefreshIcon } from '@mui/icons-material';
 import BottomNavBar from './components/BottomNavBar';
@@ -313,9 +313,25 @@ const App: React.FC = () => {
                         >
                             <MenuIcon />
                         </IconButton>
-                        <Typography variant="h6" component="div" sx={{ flexGrow: 1, color: 'primary.main', fontWeight: 'bold' }}>
-                            {selectedDevice ? selectedDevice.name : "Roku Remote"}
-                        </Typography>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexGrow: 1 }}>
+                            <Typography variant="h6" component="div" sx={{ color: 'primary.main', fontWeight: 'bold' }}>
+                                {selectedDevice ? selectedDevice.name : "Roku Remote"}
+                            </Typography>
+                            {selectedDevice && (
+                                <Tooltip title={selectedDevice.status === 'connected' ? 'Online' : 'Offline'}>
+                                    <Box
+                                        aria-label={selectedDevice.status === 'connected' ? 'Device online' : 'Device offline'}
+                                        sx={{
+                                            width: 10,
+                                            height: 10,
+                                            borderRadius: '50%',
+                                            bgcolor: selectedDevice.status === 'connected' ? 'success.main' : 'text.disabled',
+                                            flexShrink: 0,
+                                        }}
+                                    />
+                                </Tooltip>
+                            )}
+                        </Box>
                     </Toolbar>
                 </AppBar>
 
