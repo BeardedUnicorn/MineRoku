@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import {
     Box,
@@ -36,6 +36,13 @@ interface RokuApp {
 interface AppLauncherProps {
     device: RokuDevice;
 }
+
+// Card dimension constants for calculation
+const CARD_MIN_WIDTH = 150;
+const CARD_ESTIMATED_HEIGHT = 260; // CardMedia (120px) + CardContent (~140px)
+const GRID_GAP = 16; // MUI spacing of 2
+const MIN_ITEMS_PER_PAGE = 6;
+const MAX_ITEMS_PER_PAGE = 60;
 
 const AppIcon: React.FC<{ device: RokuDevice; appId: string; appName: string; size?: number }> = ({ device, appId, appName, size = 120 }) => {
     const cacheKey = `${device.ip}:${appId}`;
@@ -104,13 +111,112 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
     const [feedback, setFeedback] = useState<{ message: string; severity: 'success' | 'error' } | null>(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [currentPage, setCurrentPage] = useState(1);
-    const ITEMS_PER_PAGE = 4;
+    const [itemsPerPage, setItemsPerPage] = useState(12);
+    
+    const containerRef = useRef<HTMLDivElement>(null);
+    const gridRef = useRef<HTMLDivElement>(null);
 
     // Use hardware_id for favorites
     const { favoriteApps, toggleFavoriteApp } = useAppStore((state) => ({
         favoriteApps: state.favoriteApps[device.hardware_id] || [],
         toggleFavoriteApp: state.toggleFavoriteApp,
     }));
+
+    const favoriteAppDetails = favoriteApps
+        .map(favId => apps.find(app => app.id === favId))
+        .filter((app): app is RokuApp => !!app);
+
+    // Calculate responsive items per page based on container size
+    const calculateItemsPerPage = useCallback(() => {
+        const container = containerRef.current;
+        const grid = gridRef.current;
+        
+        let availableWidth: number;
+        let availableHeight: number;
+        
+        if (grid && container) {
+            // Use the grid container's width for column calculation
+            availableWidth = grid.clientWidth;
+            
+            // Calculate available height from the container
+            // Subtract space for: favorites section, header, search, pagination
+            const containerHeight = container.clientHeight;
+            const favoritesHeight = favoriteAppDetails.length > 0 ? 180 : 0;
+            const headerHeight = 80; // "All Applications" header + search
+            const paginationHeight = 80;
+            const margins = 48;
+            
+            availableHeight = Math.max(
+                CARD_ESTIMATED_HEIGHT,
+                containerHeight - favoritesHeight - headerHeight - paginationHeight - margins
+            );
+        } else {
+            // Fallback: estimate based on window dimensions
+            const sidebarWidth = 280;
+            const padding = 64;
+            availableWidth = Math.max(300, window.innerWidth - sidebarWidth - padding);
+            availableHeight = Math.max(CARD_ESTIMATED_HEIGHT, window.innerHeight - 350);
+        }
+        
+        // Calculate columns that fit
+        const columns = Math.max(2, Math.floor((availableWidth + GRID_GAP) / (CARD_MIN_WIDTH + GRID_GAP)));
+        
+        // Calculate rows that fit
+        const rows = Math.max(2, Math.floor((availableHeight + GRID_GAP) / (CARD_ESTIMATED_HEIGHT + GRID_GAP)));
+        
+        // Calculate items per page with min/max bounds
+        const calculated = Math.min(MAX_ITEMS_PER_PAGE, Math.max(MIN_ITEMS_PER_PAGE, columns * rows));
+        
+        return calculated;
+    }, [favoriteAppDetails.length]);
+
+    // Set up resize observer for responsive pagination
+    useEffect(() => {
+        const updateItemsPerPage = () => {
+            const newItemsPerPage = calculateItemsPerPage();
+            setItemsPerPage(prev => {
+                if (prev !== newItemsPerPage) {
+                    return newItemsPerPage;
+                }
+                return prev;
+            });
+        };
+
+        // Initial calculation with a small delay to allow layout
+        const initialTimeout = setTimeout(updateItemsPerPage, 50);
+
+        // Debounced resize handler
+        let resizeTimeout: ReturnType<typeof setTimeout>;
+        const debouncedUpdate = () => {
+            clearTimeout(resizeTimeout);
+            resizeTimeout = setTimeout(updateItemsPerPage, 100);
+        };
+
+        // Window resize listener
+        window.addEventListener('resize', debouncedUpdate);
+
+        // ResizeObserver for container changes
+        const resizeObserver = new ResizeObserver(debouncedUpdate);
+        if (containerRef.current) {
+            resizeObserver.observe(containerRef.current);
+        }
+        if (gridRef.current) {
+            resizeObserver.observe(gridRef.current);
+        }
+
+        return () => {
+            clearTimeout(initialTimeout);
+            clearTimeout(resizeTimeout);
+            window.removeEventListener('resize', debouncedUpdate);
+            resizeObserver.disconnect();
+        };
+    }, [calculateItemsPerPage]);
+
+    // Recalculate when favorites change (affects available height)
+    useEffect(() => {
+        const newItemsPerPage = calculateItemsPerPage();
+        setItemsPerPage(newItemsPerPage);
+    }, [favoriteAppDetails.length, calculateItemsPerPage]);
 
     const fetchApps = async (retryCount = 0) => {
         setIsLoading(true);
@@ -170,9 +276,21 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
         }
     };
     
+    // Reset to page 1 when search term changes
     useEffect(() => {
         setCurrentPage(1);
     }, [searchTerm]);
+
+    // Reset to page 1 when items per page changes (if current page would be out of bounds)
+    useEffect(() => {
+        const filteredCount = apps.filter(app =>
+            app.name.toLowerCase().includes(searchTerm.toLowerCase())
+        ).length;
+        const maxPage = Math.max(1, Math.ceil(filteredCount / itemsPerPage));
+        if (currentPage > maxPage) {
+            setCurrentPage(maxPage);
+        }
+    }, [itemsPerPage, apps, searchTerm, currentPage]);
 
     useEffect(() => {
         if (!device) return;
@@ -202,8 +320,8 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
         app.name.toLowerCase().includes(searchTerm.toLowerCase())
     );
 
-    const pageCount = Math.ceil(filteredApps.length / ITEMS_PER_PAGE);
-    const paginatedApps = filteredApps.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
+    const pageCount = Math.ceil(filteredApps.length / itemsPerPage);
+    const paginatedApps = filteredApps.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
     
     const handlePageChange = (_event: React.ChangeEvent<unknown>, value: number) => {
         setCurrentPage(value);
@@ -213,14 +331,18 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
         fetchApps();
     };
 
-    const favoriteAppDetails = favoriteApps
-        .map(favId => apps.find(app => app.id === favId))
-        .filter((app): app is RokuApp => !!app);
-
     return (
-        <Box>
+        <Box 
+            ref={containerRef} 
+            sx={{ 
+                height: '100%', 
+                display: 'flex', 
+                flexDirection: 'column',
+                minHeight: 0, // Important for flex children to shrink properly
+            }}
+        >
             {favoriteAppDetails.length > 0 && (
-                <>
+                <Box sx={{ flexShrink: 0 }}>
                     <Typography variant="h6" sx={{ mb: 2 }}>Favorite Apps</Typography>
                     <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 4 }}>
                         {favoriteAppDetails.map((app) => (
@@ -245,10 +367,19 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
                         ))}
                     </Box>
                     <Divider sx={{ mb: 4 }} />
-                </>
+                </Box>
             )}
 
-            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3, flexWrap: 'wrap', gap: 2 }}>
+            <Box sx={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'space-between', 
+                mb: 3, 
+                flexWrap: 'wrap', 
+                gap: 2,
+                flexShrink: 0,
+                paddingTop: 1
+            }}>
                 <Typography variant="h6">All Applications ({filteredApps.length})</Typography>
                 <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
                     <TextField
@@ -272,61 +403,72 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
                 </Box>
             </Box>
 
-            {isLoading ? (
-                <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}><CircularProgress /></Box>
-            ) : filteredApps.length > 0 ? (
-                <>
-                    <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 2 }}>
-                        {paginatedApps.map((app) => (
-                             <Card key={app.id} sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-                                <AppIcon device={device} appId={app.id} appName={app.name} />
-                                <CardContent sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
-                                    <Tooltip title={app.name}>
-                                        <Typography variant="h6" sx={{ fontSize: '1rem', fontWeight: 'bold', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                            {app.name}
-                                        </Typography>
-                                    </Tooltip>
-                                    <Typography variant="caption" color="text.secondary">ID: {app.id}</Typography>
-                                    <Box sx={{ mt: 'auto', pt: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
-                                        <Button
-                                            fullWidth
-                                            variant="contained"
-                                            onClick={() => launchApp(app.id, app.name)}
-                                            disabled={isLaunching === app.id}
-                                            startIcon={isLaunching === app.id ? <CircularProgress color="inherit" size={16} /> : <LaunchIcon />}
-                                        >
-                                            {isLaunching === app.id ? 'Launching...' : 'Launch'}
-                                        </Button>
-                                        <Tooltip title={favoriteApps.includes(app.id) ? "Remove from favorites" : "Add to favorites"}>
-                                            <IconButton onClick={() => toggleFavoriteApp(device.hardware_id, app.id)}>
-                                                {favoriteApps.includes(app.id) ? <StarIcon color="primary" /> : <StarBorderIcon />}
-                                            </IconButton>
+            <Box sx={{ flexGrow: 1, minHeight: 0, overflow: 'auto' }}>
+                {isLoading ? (
+                    <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}><CircularProgress /></Box>
+                ) : filteredApps.length > 0 ? (
+                    <>
+                        <Box 
+                            ref={gridRef}
+                            sx={{ 
+                                display: 'grid', 
+                                gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', 
+                                gap: 2 
+                            }}
+                        >
+                            {paginatedApps.map((app) => (
+                                 <Card key={app.id} sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+                                    <AppIcon device={device} appId={app.id} appName={app.name} />
+                                    <CardContent sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
+                                        <Tooltip title={app.name}>
+                                            <Typography variant="h6" sx={{ fontSize: '1rem', fontWeight: 'bold', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                {app.name}
+                                            </Typography>
                                         </Tooltip>
-                                    </Box>
-                                </CardContent>
-                            </Card>
-                        ))}
-                    </Box>
-                    {pageCount > 1 && (
-                        <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4, mb: 2 }}>
-                            <Pagination
-                                count={pageCount}
-                                page={currentPage}
-                                onChange={handlePageChange}
-                                color="primary"
-                            />
+                                        <Typography variant="caption" color="text.secondary">ID: {app.id}</Typography>
+                                        <Box sx={{ mt: 'auto', pt: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                                            <Button
+                                                fullWidth
+                                                variant="contained"
+                                                onClick={() => launchApp(app.id, app.name)}
+                                                disabled={isLaunching === app.id}
+                                                startIcon={isLaunching === app.id ? <CircularProgress color="inherit" size={16} /> : <LaunchIcon />}
+                                            >
+                                                {isLaunching === app.id ? 'Launching...' : 'Launch'}
+                                            </Button>
+                                            <Tooltip title={favoriteApps.includes(app.id) ? "Remove from favorites" : "Add to favorites"}>
+                                                <IconButton onClick={() => toggleFavoriteApp(device.hardware_id, app.id)}>
+                                                    {favoriteApps.includes(app.id) ? <StarIcon color="primary" /> : <StarBorderIcon />}
+                                                </IconButton>
+                                            </Tooltip>
+                                        </Box>
+                                    </CardContent>
+                                </Card>
+                            ))}
                         </Box>
-                    )}
-                </>
-            ) : (
-                <Box sx={{ textAlign: 'center', p: 4, mt: 4, border: '1px dashed', borderColor: 'divider', borderRadius: 2 }}>
-                    <SearchIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
-                    <Typography variant="h6" color="text.secondary">No matching apps found</Typography>
-                    <Typography variant="body1" color="text.secondary" sx={{ mt: 1 }}>
-                        Try clearing your search or refreshing the list.
-                    </Typography>
-                </Box>
-            )}
+                        {pageCount > 1 && (
+                            <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4, mb: 2 }}>
+                                <Pagination
+                                    count={pageCount}
+                                    page={currentPage}
+                                    onChange={handlePageChange}
+                                    color="primary"
+                                    showFirstButton
+                                    showLastButton
+                                />
+                            </Box>
+                        )}
+                    </>
+                ) : (
+                    <Box sx={{ textAlign: 'center', p: 4, mt: 4, border: '1px dashed', borderColor: 'divider', borderRadius: 2 }}>
+                        <SearchIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
+                        <Typography variant="h6" color="text.secondary">No matching apps found</Typography>
+                        <Typography variant="body1" color="text.secondary" sx={{ mt: 1 }}>
+                            Try clearing your search or refreshing the list.
+                        </Typography>
+                    </Box>
+                )}
+            </Box>
 
             <Snackbar 
                 open={!!feedback} 
