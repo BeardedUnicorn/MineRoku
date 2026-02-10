@@ -45,7 +45,7 @@ const MIN_ITEMS_PER_PAGE = 6;
 const MAX_ITEMS_PER_PAGE = 60;
 
 const AppIcon: React.FC<{ device: RokuDevice; appId: string; appName: string; size?: number }> = ({ device, appId, appName, size = 120 }) => {
-    const cacheKey = `${device.ip}:${appId}`;
+    const cacheKey = `${device.ip}:${device.port}:${appId}`;
     const [icon, setIcon] = useState<string | null>(() => {
         const cached = iconCache.get(cacheKey);
         if (cached && Date.now() - cached.timestamp < ICON_CACHE_TTL_MS) {
@@ -89,7 +89,7 @@ const AppIcon: React.FC<{ device: RokuDevice; appId: string; appName: string; si
         return () => {
             cancelled = true;
         };
-    }, [device.ip, device.port, appId, appName, cacheKey]);
+    }, [device.ip, device.port, appId, cacheKey]);
 
     const sxProps = {
         height: size,

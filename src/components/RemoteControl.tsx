@@ -178,7 +178,7 @@ const useActiveAppIcon = (device: RokuDevice, app: ActiveApp | null) => {
       return;
     }
 
-    const cacheKey = `${device.ip}:${app.id}`;
+    const cacheKey = `${device.ip}:${device.port}:${app.id}`;
     if (lastKeyRef.current === cacheKey) return;
 
     const cached = iconCache.get(cacheKey);
@@ -243,8 +243,13 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
   const lastDeviceKeyRef = useRef<string | null>(null);
   const busyRef = useRef<Set<string>>(new Set());
   const abortControllerRef = useRef<AbortController | null>(null);
+  const deviceStatusRef = useRef<RokuDevice['status']>(device.status);
   const currentPlatform = usePlatform();
   const activeAppIcon = useActiveAppIcon(device, activeApp);
+
+  useEffect(() => {
+    deviceStatusRef.current = device.status;
+  }, [device.status]);
 
   const parseTime = (timeStr?: string): number => {
     if (!timeStr) return 0;
@@ -288,7 +293,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
       }, 6500);
 
       try {
-        if (device.status && device.status !== 'connected') {
+        if (deviceStatusRef.current && deviceStatusRef.current !== 'connected') {
           setActiveApp(null);
           setMediaInfo(null);
           return;
@@ -328,13 +333,13 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
         abortControllerRef.current.abort();
       }
     };
-  }, [device.hardware_id, device.ip, device.port, device.status]);
+  }, [device.hardware_id, device.ip, device.port]);
 
   useEffect(() => {
     let intervalId: number | undefined;
 
     const fetchActiveApp = async () => {
-      if (device.status && device.status !== 'connected') {
+      if (deviceStatusRef.current && deviceStatusRef.current !== 'connected') {
         return;
       }
       try {
@@ -346,7 +351,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
     };
 
     const fetchMediaInfo = async () => {
-      if (device.status && device.status !== 'connected') {
+      if (deviceStatusRef.current && deviceStatusRef.current !== 'connected') {
         setMediaInfo(null);
         return;
       }
@@ -392,11 +397,11 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
       stopPolling();
       unlistenFocusPromise.then((unlisten: () => void) => unlisten());
     };
-  }, [device.hardware_id, device.ip, device.port, device.status]);
+  }, [device.hardware_id, device.ip, device.port]);
 
   const sendCommand = useCallback(
     async (command: string) => {
-      if (device.status && device.status !== 'connected') {
+      if (deviceStatusRef.current && deviceStatusRef.current !== 'connected') {
         setFeedback({ message: 'Device appears offline', severity: 'error' });
         return;
       }
@@ -414,7 +419,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
         busyRef.current.delete(command);
       }
     },
-    [device.ip, device.port, device.status]
+    [device.ip, device.port]
   );
 
   useEffect(() => {

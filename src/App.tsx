@@ -1,4 +1,4 @@
-import React, { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import Sidebar from './components/Sidebar';
 import RemoteControl from './components/RemoteControl';
@@ -67,6 +67,7 @@ const App: React.FC = () => {
   const [mobileView, setMobileView] = useState<'remote' | 'apps'>('remote');
   const [isScanning, setIsScanning] = useState(false);
   const [scanStatus, setScanStatus] = useState('');
+  const scanPromiseRef = useRef<Promise<void> | null>(null);
 
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
@@ -156,44 +157,57 @@ const App: React.FC = () => {
   }, []);
 
   const scanForDevices = useCallback(async () => {
-    setIsScanning(true);
-    setIsSearching(true);
-    setScanStatus('Scanning network...');
-
-    try {
-      const foundDevices = await discoverRokuDevices();
-      const devicesWithStatus: RokuDevice[] = foundDevices.map((device) => ({
-        ...device,
-        status: 'connected',
-      }));
-
-      addDiscoveredDevices(devicesWithStatus);
-
-      const discoveredIds = new Set(foundDevices.map((device) => device.hardware_id));
-      const state = useAppStore.getState();
-
-      state.devices.forEach((device) => {
-        if (!discoveredIds.has(device.hardware_id)) {
-          markDeviceDisconnected(device.hardware_id);
-        }
-      });
-
-      const anyDevicesFound = foundDevices.length > 0;
-      setDevicesFound(anyDevicesFound);
-      setScanStatus(
-        anyDevicesFound ? `Found ${foundDevices.length} device(s)` : 'No devices found'
-      );
-
-      if (!state.selectedDevice && anyDevicesFound) {
-        setSelectedDevice({ ...foundDevices[0], status: 'connected' });
-      }
-    } catch (error) {
-      console.error('Discovery error:', error);
-      setScanStatus(`Error: ${error}`);
-    } finally {
-      setIsScanning(false);
-      setIsSearching(false);
+    if (scanPromiseRef.current) {
+      return scanPromiseRef.current;
     }
+
+    const scanPromise = (async () => {
+      setIsScanning(true);
+      setIsSearching(true);
+      setScanStatus('Scanning network...');
+
+      try {
+        const foundDevices = await discoverRokuDevices();
+        const devicesWithStatus: RokuDevice[] = foundDevices.map((device) => ({
+          ...device,
+          status: 'connected',
+        }));
+
+        addDiscoveredDevices(devicesWithStatus);
+
+        const discoveredIds = new Set(foundDevices.map((device) => device.hardware_id));
+        const state = useAppStore.getState();
+
+        state.devices.forEach((device) => {
+          if (!discoveredIds.has(device.hardware_id)) {
+            markDeviceDisconnected(device.hardware_id);
+          }
+        });
+
+        const anyDevicesFound = foundDevices.length > 0;
+        setDevicesFound(anyDevicesFound);
+        setScanStatus(
+          anyDevicesFound ? `Found ${foundDevices.length} device(s)` : 'No devices found'
+        );
+
+        if (!state.selectedDevice && anyDevicesFound) {
+          setSelectedDevice({ ...foundDevices[0], status: 'connected' });
+        }
+      } catch (error) {
+        console.error('Discovery error:', error);
+        setScanStatus(`Error: ${error}`);
+      } finally {
+        setIsScanning(false);
+        setIsSearching(false);
+      }
+    })();
+
+    scanPromiseRef.current = scanPromise;
+    await scanPromise.finally(() => {
+      if (scanPromiseRef.current === scanPromise) {
+        scanPromiseRef.current = null;
+      }
+    });
   }, [addDiscoveredDevices, markDeviceDisconnected, setSelectedDevice]);
 
   useEffect(() => {

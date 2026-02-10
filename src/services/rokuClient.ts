@@ -54,8 +54,46 @@ interface UpdateMediaNotificationArgs {
   appIconUrl?: string;
 }
 
+const ICON_REQUEST_CONCURRENCY = 6;
+
+let discoverInFlight: Promise<RokuDeviceEvent[]> | null = null;
+let activeIconRequests = 0;
+const iconQueue: Array<() => void> = [];
+const iconInFlight = new Map<string, Promise<string>>();
+
+function enqueueIconRequest<T>(task: () => Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const run = () => {
+      activeIconRequests += 1;
+      task()
+        .then(resolve, reject)
+        .finally(() => {
+          activeIconRequests -= 1;
+          const next = iconQueue.shift();
+          if (next) {
+            next();
+          }
+        });
+    };
+
+    if (activeIconRequests < ICON_REQUEST_CONCURRENCY) {
+      run();
+      return;
+    }
+
+    iconQueue.push(run);
+  });
+}
+
 export async function discoverRokuDevices(): Promise<RokuDeviceEvent[]> {
-  return invoke<RokuDeviceEvent[]>('discover_roku_devices');
+  if (discoverInFlight) {
+    return discoverInFlight;
+  }
+
+  discoverInFlight = invoke<RokuDeviceEvent[]>('discover_roku_devices').finally(() => {
+    discoverInFlight = null;
+  });
+  return discoverInFlight;
 }
 
 export async function checkDeviceConnectivity(ip: string, port: number): Promise<boolean> {
@@ -87,7 +125,19 @@ export async function getActiveApp(ip: string, port: number): Promise<ActiveAppI
 }
 
 export async function getAppIcon(ip: string, port: number, appId: string): Promise<string> {
-  return invoke<string>('get_app_icon', { ip, port, app_id: appId });
+  const requestKey = `${ip}:${port}:${appId}`;
+  const inFlight = iconInFlight.get(requestKey);
+  if (inFlight) {
+    return inFlight;
+  }
+
+  const request = enqueueIconRequest(() => invoke<string>('get_app_icon', { ip, port, app_id: appId }))
+    .finally(() => {
+      iconInFlight.delete(requestKey);
+    });
+
+  iconInFlight.set(requestKey, request);
+  return request;
 }
 
 export async function getCachedDevices(): Promise<RokuDeviceEvent[]> {
