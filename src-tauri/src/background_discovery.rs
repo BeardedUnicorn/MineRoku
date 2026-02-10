@@ -66,6 +66,7 @@ pub async fn run_discovery_once(app: &AppHandle) -> Result<Vec<RokuDeviceEvent>,
 
     let mut discovered_devices: Vec<RokuDeviceEvent> = Vec::new();
     let mut seen_hardware_ids: HashSet<String> = HashSet::new();
+    let mut seen_endpoints: HashSet<(String, u16)> = HashSet::new();
     let mut response_count = 0;
     let mut next_wait_window = SSDP_INITIAL_WAIT;
 
@@ -120,6 +121,16 @@ pub async fn run_discovery_once(app: &AppHandle) -> Result<Vec<RokuDeviceEvent>,
 
         let ip = desc_url.host_str().unwrap_or_default().to_string();
         let port = desc_url.port_or_known_default().unwrap_or(8060);
+
+        if ip.is_empty() {
+            log::warn!("SSDP response had empty host in LOCATION '{}'", resp.location());
+            continue;
+        }
+
+        if !seen_endpoints.insert((ip.clone(), port)) {
+            log::debug!("Skipping duplicate SSDP endpoint response for {}:{}", ip, port);
+            continue;
+        }
 
         log::info!("Fetching device info from: {}:{}", ip, port);
 
