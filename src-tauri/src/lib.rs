@@ -16,6 +16,7 @@ use commands::{
 };
 
 use background::init_background_tasks;
+#[cfg(not(target_os = "android"))]
 use background_discovery::start_background_discovery;
 use tauri::command;
 use tauri_plugin_opener::init as opener;
