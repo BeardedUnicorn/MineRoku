@@ -36,6 +36,46 @@ import {
 const LazyAppLauncher = lazy(() => import('./components/AppLauncher'));
 
 const CONNECTIVITY_POLL_INTERVAL = 10000;
+let discoveryListenersReady: Promise<void> | null = null;
+
+const ensureDiscoveryListeners = () => {
+  if (discoveryListenersReady) {
+    return discoveryListenersReady;
+  }
+
+  discoveryListenersReady = Promise.all([
+    listen<RokuDeviceEvent>('device_discovered', (event) => {
+      const device = event.payload;
+      const state = useAppStore.getState();
+      state.upsertDevice({ ...device, status: 'connected' });
+
+      if (!state.selectedDevice) {
+        if (!state.preferLastUsed) {
+          state.setSelectedDevice({ ...device, status: 'connected' });
+        }
+        return;
+      }
+
+      if (
+        !state.preferLastUsed &&
+        state.selectedDevice.status === 'disconnected' &&
+        state.selectedDevice.hardware_id !== device.hardware_id
+      ) {
+        state.setSelectedDevice({ ...device, status: 'connected' });
+      }
+    }),
+    listen<RokuDeviceEvent>('device_lost', (event) => {
+      useAppStore.getState().markDeviceDisconnected(event.payload.hardware_id);
+    }),
+  ])
+    .then(() => undefined)
+    .catch((error) => {
+      discoveryListenersReady = null;
+      throw error;
+    });
+
+  return discoveryListenersReady;
+};
 
 const App: React.FC = () => {
   const {
@@ -210,7 +250,6 @@ const App: React.FC = () => {
 
   useEffect(() => {
     let active = true;
-    let unsubs: Array<() => void> = [];
 
     const bootstrapCachedDevices = async () => {
       try {
@@ -230,65 +269,17 @@ const App: React.FC = () => {
       }
     };
 
-    const initListeners = async () => {
-      try {
-        const [u1, u2, u3, u4] = await Promise.all([
-          listen('discovery_cycle_start', () => {
-            setIsScanning(true);
-            setIsSearching(true);
-          }),
-          listen('discovery_cycle_end', () => {
-            setIsScanning(false);
-            setIsSearching(false);
-          }),
-          listen<RokuDeviceEvent>('device_discovered', (event) => {
-            const device = event.payload;
-            upsertDevice({ ...device, status: 'connected' });
-            setDevicesFound(true);
-
-            const state = useAppStore.getState();
-            if (!state.selectedDevice) {
-              if (!state.preferLastUsed) {
-                setSelectedDevice({ ...device, status: 'connected' });
-              }
-              return;
-            }
-
-            if (
-              !state.preferLastUsed &&
-              state.selectedDevice.status === 'disconnected' &&
-              state.selectedDevice.hardware_id !== device.hardware_id
-            ) {
-              setSelectedDevice({ ...device, status: 'connected' });
-            }
-          }),
-          listen<RokuDeviceEvent>('device_lost', (event) => {
-            markDeviceDisconnected(event.payload.hardware_id);
-          }),
-        ]);
-
-        if (!active) {
-          u1();
-          u2();
-          u3();
-          u4();
-          return;
-        }
-
-        unsubs = [u1, u2, u3, u4];
-      } catch (error) {
+    void Promise.all([bootstrapCachedDevices(), ensureDiscoveryListeners()]).catch((error) => {
+      if (active) {
         console.error('Failed to initialize discovery listeners:', error);
       }
-    };
-
-    void Promise.all([bootstrapCachedDevices(), initListeners()]);
+    });
     void scanForDevices();
 
     return () => {
       active = false;
-      unsubs.forEach((unsub) => unsub());
     };
-  }, [scanForDevices, upsertDevice, markDeviceDisconnected, setSelectedDevice]);
+  }, [scanForDevices, upsertDevice, setSelectedDevice]);
 
   const contentVariants = useMemo(
     () =>

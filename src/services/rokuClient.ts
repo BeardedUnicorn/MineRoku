@@ -57,9 +57,31 @@ interface UpdateMediaNotificationArgs {
 const ICON_REQUEST_CONCURRENCY = 6;
 
 let discoverInFlight: Promise<RokuDeviceEvent[]> | null = null;
+const listAppsInFlight = new Map<string, Promise<RokuApp[]>>();
 let activeIconRequests = 0;
 const iconQueue: Array<() => void> = [];
 const iconInFlight = new Map<string, Promise<string>>();
+
+function normalizeRokuApp(raw: unknown): RokuApp | null {
+  if (!raw || typeof raw !== 'object') {
+    return null;
+  }
+
+  const app = raw as Record<string, unknown>;
+  const idValue = app.id ?? app.appId ?? app.app_id;
+  const nameValue = app.name;
+  const versionValue = app.version;
+
+  const id = typeof idValue === 'string' ? idValue.trim() : '';
+  const name = typeof nameValue === 'string' ? nameValue.trim() : '';
+  const version = typeof versionValue === 'string' && versionValue.trim() ? versionValue : 'N/A';
+
+  if (!id || !name) {
+    return null;
+  }
+
+  return { id, name, version };
+}
 
 function enqueueIconRequest<T>(task: () => Promise<T>): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -105,7 +127,20 @@ export async function getMediaPlayer(ip: string, port: number): Promise<MediaPla
 }
 
 export async function listRokuApps(ip: string, port: number): Promise<RokuApp[]> {
-  return invoke<RokuApp[]>('list_roku_apps', { ip, port });
+  const requestKey = `${ip}:${port}`;
+  const inFlight = listAppsInFlight.get(requestKey);
+  if (inFlight) {
+    return inFlight;
+  }
+
+  const request = invoke<unknown[]>('list_roku_apps', { ip, port })
+    .then((apps) => apps.map(normalizeRokuApp).filter((app): app is RokuApp => app !== null))
+    .finally(() => {
+      listAppsInFlight.delete(requestKey);
+    });
+
+  listAppsInFlight.set(requestKey, request);
+  return request;
 }
 
 export async function sendRokuCommand(
@@ -121,10 +156,21 @@ export async function launchRokuApp(ip: string, port: number, appId: string): Pr
 }
 
 export async function getActiveApp(ip: string, port: number): Promise<ActiveAppInfo> {
-  return invoke<ActiveAppInfo>('get_active_app', { ip, port });
+  const app = await invoke<Record<string, unknown>>('get_active_app', { ip, port });
+  const id = app.id ?? app.appId ?? app.app_id;
+  const name = app.name;
+
+  return {
+    id: typeof id === 'string' && id.trim() ? id : 'roku',
+    name: typeof name === 'string' && name.trim() ? name : 'Roku',
+  };
 }
 
 export async function getAppIcon(ip: string, port: number, appId: string): Promise<string> {
+  if (!appId?.trim()) {
+    throw new Error('Missing app id for icon request');
+  }
+
   const requestKey = `${ip}:${port}:${appId}`;
   const inFlight = iconInFlight.get(requestKey);
   if (inFlight) {
@@ -145,7 +191,8 @@ export async function getCachedDevices(): Promise<RokuDeviceEvent[]> {
 }
 
 export async function getCachedApps(ip: string): Promise<RokuApp[]> {
-  return invoke<RokuApp[]>('get_cached_apps', { ip });
+  const apps = await invoke<unknown[]>('get_cached_apps', { ip });
+  return apps.map(normalizeRokuApp).filter((app): app is RokuApp => app !== null);
 }
 
 export async function clearAllData(): Promise<void> {

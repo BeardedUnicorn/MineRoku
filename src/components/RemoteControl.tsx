@@ -1,5 +1,4 @@
 import React, { lazy, Suspense, useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { Window } from "@tauri-apps/api/window";
 import { iconCache, ICON_CACHE_TTL_MS, ICON_CACHE_LIMIT } from '../iconCache';
 import {
   Box,
@@ -377,23 +376,35 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
       }
     };
 
-    const unlistenFocusPromise = Window.getCurrent().onFocusChanged(({ payload: focused }: { payload: boolean }) => {
-      if (focused) {
+    const onFocus = () => {
+      startPolling();
+    };
+
+    const onBlur = () => {
+      stopPolling();
+    };
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && document.hasFocus()) {
         startPolling();
       } else {
         stopPolling();
       }
-    });
+    };
 
-    Window.getCurrent().isFocused().then((focused: boolean) => {
-        if (focused) {
-            startPolling();
-        }
-    });
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('blur', onBlur);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
+    if (document.visibilityState === 'visible' && document.hasFocus()) {
+      startPolling();
+    }
 
     return () => {
       stopPolling();
-      unlistenFocusPromise.then((unlisten: () => void) => unlisten());
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('blur', onBlur);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
     };
   }, [device.hardware_id, device.ip, device.port]);
 
