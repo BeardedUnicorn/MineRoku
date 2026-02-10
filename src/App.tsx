@@ -28,9 +28,10 @@ import { usePlatform } from './hooks/usePlatform';
 import {
   checkDeviceConnectivity,
   discoverRokuDevices,
+  ensureAndroidDiscoveryPermissions,
   getCachedDevices,
+  openAndroidAppSettings,
   type RokuDeviceEvent,
-  updateMediaNotification,
 } from './services/rokuClient';
 
 const LazyAppLauncher = lazy(() => import('./components/AppLauncher'));
@@ -168,28 +169,6 @@ const App: React.FC = () => {
     };
   }, [selectedDevice?.hardware_id, selectedDevice?.ip, selectedDevice?.port, updateDeviceStatus]);
 
-  useEffect(() => {
-    if (currentPlatform !== 'android' || !selectedDevice) {
-      return;
-    }
-
-    void updateMediaNotification({
-      deviceName: selectedDevice.name,
-      deviceIp: selectedDevice.ip,
-      devicePort: selectedDevice.port,
-      appName: 'Roku Remote',
-      isPlaying: false,
-    }).catch((error) => {
-      console.log('Media notification update not available:', error);
-    });
-  }, [
-    currentPlatform,
-    selectedDevice?.hardware_id,
-    selectedDevice?.name,
-    selectedDevice?.ip,
-    selectedDevice?.port,
-  ]);
-
   const handleToggleSidebar = useCallback(() => {
     setIsSidebarOpen((v) => !v);
   }, []);
@@ -200,6 +179,17 @@ const App: React.FC = () => {
     }
 
     const scanPromise = (async () => {
+      if (currentPlatform === 'android') {
+        const hasPermissions = await ensureAndroidDiscoveryPermissions();
+        if (!hasPermissions) {
+          setIsSearching(false);
+          setScanStatus(
+            'Discovery permissions are required. Allow location and nearby devices, then tap refresh again.'
+          );
+          return;
+        }
+      }
+
       setIsScanning(true);
       setIsSearching(true);
       setScanStatus('Scanning network...');
@@ -246,7 +236,7 @@ const App: React.FC = () => {
         scanPromiseRef.current = null;
       }
     });
-  }, [addDiscoveredDevices, markDeviceDisconnected, setSelectedDevice]);
+  }, [addDiscoveredDevices, currentPlatform, markDeviceDisconnected, setSelectedDevice]);
 
   useEffect(() => {
     let active = true;
@@ -274,12 +264,17 @@ const App: React.FC = () => {
         console.error('Failed to initialize discovery listeners:', error);
       }
     });
-    void scanForDevices();
+    if (currentPlatform === 'android') {
+      setIsSearching(false);
+      setScanStatus((status) => status || 'Tap refresh to scan for Roku devices.');
+    } else {
+      void scanForDevices();
+    }
 
     return () => {
       active = false;
     };
-  }, [scanForDevices, upsertDevice, setSelectedDevice]);
+  }, [currentPlatform, scanForDevices, upsertDevice, setSelectedDevice]);
 
   const contentVariants = useMemo(
     () =>
@@ -379,6 +374,8 @@ const App: React.FC = () => {
     }
 
     if (!hasAnyDevices) {
+      const discoveryPermissionBlocked =
+        currentPlatform === 'android' && scanStatus.toLowerCase().includes('permission');
       return (
         <Paper
           sx={{
@@ -412,6 +409,19 @@ const App: React.FC = () => {
           >
             {isScanning ? 'Scanning...' : 'Refresh'}
           </Button>
+          {discoveryPermissionBlocked && (
+            <Button
+              variant="outlined"
+              sx={{ mt: 1.5 }}
+              onClick={() => {
+                void openAndroidAppSettings().catch((error) => {
+                  console.error('Failed to open Android app settings:', error);
+                });
+              }}
+            >
+              Open Settings
+            </Button>
+          )}
         </Paper>
       );
     }
@@ -445,6 +455,7 @@ const App: React.FC = () => {
     scanStatus,
     isScanning,
     scanForDevices,
+    currentPlatform,
   ]);
 
   return (

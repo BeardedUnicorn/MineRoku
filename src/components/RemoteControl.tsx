@@ -1,6 +1,7 @@
 import React, { lazy, Suspense, useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { iconCache, ICON_CACHE_TTL_MS, ICON_CACHE_LIMIT } from '../iconCache';
 import {
+  Button,
   Box,
   Paper,
   Typography,
@@ -30,9 +31,11 @@ import {
 import { RokuDevice } from '../store';
 import { usePlatform } from '../hooks/usePlatform';
 import {
+  ensureAndroidNotificationPermission,
   getActiveApp,
   getAppIcon,
   getMediaPlayer,
+  openAndroidAppSettings,
   sendRokuCommand,
   updateMediaNotification,
   type ActiveAppInfo,
@@ -233,6 +236,7 @@ const ActiveAppIcon: React.FC<{ app: ActiveApp; icon: string | null }> = ({ app,
 const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
   const theme = useTheme();
   const [feedback, setFeedback] = useState<FeedbackState>(null);
+  const [showSettingsAction, setShowSettingsAction] = useState(false);
   const [activeApp, setActiveApp] = useState<ActiveApp | null>(null);
   const [isAppLoading, setIsAppLoading] = useState<boolean>(true);
   const [mediaInfo, setMediaInfo] = useState<MediaPlayerInfo | null>(null);
@@ -242,7 +246,12 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
   const abortControllerRef = useRef<AbortController | null>(null);
   const deviceStatusRef = useRef<RokuDevice['status']>(device.status);
   const currentPlatform = usePlatform();
+  const notificationPermissionReadyRef = useRef(currentPlatform !== 'android');
   const activeAppIcon = useActiveAppIcon(device, activeApp);
+
+  useEffect(() => {
+    notificationPermissionReadyRef.current = currentPlatform !== 'android';
+  }, [currentPlatform]);
 
   useEffect(() => {
     deviceStatusRef.current = device.status;
@@ -507,10 +516,21 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
 
     const updateNotification = async () => {
       try {
-        const iconUrl =
-          activeApp.id !== 'roku'
-            ? `http://${device.ip}:${device.port}/query/icon/${activeApp.id}`
-            : undefined;
+        if (!notificationPermissionReadyRef.current) {
+          const hasPermission = await ensureAndroidNotificationPermission();
+          if (!hasPermission) {
+            setShowSettingsAction(true);
+            setFeedback({
+              message:
+                'Notification permission is required for lock-screen controls. Grant permission and retry.',
+              severity: 'error',
+            });
+            return;
+          }
+          notificationPermissionReadyRef.current = true;
+          setShowSettingsAction(false);
+        }
+
         const mediaState = mediaInfo?.state?.toLowerCase();
         const playing = mediaState === 'play' || mediaState === 'playing';
 
@@ -519,8 +539,8 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
           deviceIp: device.ip,
           devicePort: device.port,
           appName: activeApp.name,
+          appId: activeApp.id === 'roku' ? undefined : activeApp.id,
           isPlaying: playing,
-          appIconUrl: iconUrl,
         });
       } catch (error) {
         console.log('Failed to update media notification:', error);
@@ -775,7 +795,26 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
       )}
 
       <Snackbar open={!!feedback} autoHideDuration={3000} onClose={() => setFeedback(null)} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }} >
-        <Alert onClose={() => setFeedback(null)} severity={feedback?.severity} sx={{ width: '100%' }} >
+        <Alert
+          onClose={() => setFeedback(null)}
+          severity={feedback?.severity}
+          sx={{ width: '100%' }}
+          action={
+            showSettingsAction ? (
+              <Button
+                color="inherit"
+                size="small"
+                onClick={() => {
+                  void openAndroidAppSettings().catch((error) => {
+                    console.error('Failed to open Android app settings:', error);
+                  });
+                }}
+              >
+                Settings
+              </Button>
+            ) : undefined
+          }
+        >
           {feedback?.message}
         </Alert>
       </Snackbar>

@@ -212,6 +212,14 @@ When customizing the Gradle properties `archList` and `targetList` for the Andro
 ensure both lists contain the same number of entries so each architecture pairs with a
 corresponding Rust compilation target. Mismatched lists will cause the build to fail.
 
+Android verification commands:
+- `npm run android:lint`
+- `npm run android:test`
+
+Signing setup:
+- Copy `src-tauri/gen/android/keystore.properties.example` to `src-tauri/gen/android/keystore.properties`
+- Fill in your local signing values (do not commit the real file)
+
 ## Contributing
 
 1. Fork the repository
