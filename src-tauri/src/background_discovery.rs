@@ -9,6 +9,21 @@ use chrono::Utc;
 use crate::background::{cache_device_bg, DeviceCache};
 use crate::commands::{extract_device_info, generate_hardware_id, scan_network_for_roku};
 
+#[cfg(target_os = "android")]
+const SSDP_INITIAL_WAIT: Duration = Duration::from_secs(5);
+#[cfg(not(target_os = "android"))]
+const SSDP_INITIAL_WAIT: Duration = Duration::from_secs(2);
+
+#[cfg(target_os = "android")]
+const SSDP_FOLLOWUP_WAIT: Duration = Duration::from_secs(2);
+#[cfg(not(target_os = "android"))]
+const SSDP_FOLLOWUP_WAIT: Duration = Duration::from_millis(900);
+
+#[cfg(target_os = "android")]
+const SSDP_MX: usize = 4;
+#[cfg(not(target_os = "android"))]
+const SSDP_MX: usize = 2;
+
 #[derive(Debug, Clone, Serialize)]
 pub struct RokuDeviceEvent {
     pub name: String,
@@ -37,7 +52,7 @@ pub async fn run_discovery_once(app: &AppHandle) -> Result<Vec<RokuDeviceEvent>,
 
     log::info!("Using search timeout: {:?}", search_timeout);
 
-    let mut responses = match search(&search_target, search_timeout, 5, Some(4)).await {
+    let mut responses = match search(&search_target, search_timeout, SSDP_MX, Some(4)).await {
         Ok(s) => {
             log::info!("SSDP search initiated successfully");
             s
@@ -52,10 +67,27 @@ pub async fn run_discovery_once(app: &AppHandle) -> Result<Vec<RokuDeviceEvent>,
     let mut discovered_devices: Vec<RokuDeviceEvent> = Vec::new();
     let mut seen_hardware_ids: HashSet<String> = HashSet::new();
     let mut response_count = 0;
+    let mut next_wait_window = SSDP_INITIAL_WAIT;
 
     log::info!("Waiting for SSDP responses...");
 
-    while let Some(resp_res) = responses.next().await {
+    loop {
+        let next_item = tokio::time::timeout(next_wait_window, responses.next()).await;
+        let resp_res = match next_item {
+            Ok(Some(item)) => item,
+            Ok(None) => {
+                log::info!("SSDP response stream ended");
+                break;
+            }
+            Err(_) => {
+                log::info!(
+                    "No SSDP responses for {:?}; ending this discovery cycle",
+                    next_wait_window
+                );
+                break;
+            }
+        };
+
         response_count += 1;
         log::info!("Processing SSDP response #{}", response_count);
         
@@ -138,6 +170,9 @@ pub async fn run_discovery_once(app: &AppHandle) -> Result<Vec<RokuDeviceEvent>,
                 log::warn!("Failed to get device info for {}:{}: {}", ip, port, e);
             }
         }
+
+        // After first response, keep a short quiet window to gather additional devices.
+        next_wait_window = SSDP_FOLLOWUP_WAIT;
     }
 
     log::info!("SSDP discovery complete. Found {} unique devices from {} responses", 
