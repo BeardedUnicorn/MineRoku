@@ -12,6 +12,7 @@ use commands::{
     discover_roku_devices_impl, get_active_app_impl, get_app_icon_impl, launch_roku_app_impl,
     list_roku_apps_impl, send_roku_command_impl, test_network_connectivity, 
     ActiveAppInfo, RokuApp, get_media_player_impl, MediaPlayerInfo, RokuDevice,
+    check_device_connectivity_impl,
 };
 
 use tauri::command;
@@ -22,6 +23,11 @@ use background::init_background_tasks;
 #[command]
 async fn discover_roku_devices(app: tauri::AppHandle) -> Result<Vec<RokuDevice>, String> {
     discover_roku_devices_impl(&app).await
+}
+
+#[command]
+async fn check_device_connectivity(ip: String, port: u16) -> Result<bool, String> {
+    check_device_connectivity_impl(ip, port).await
 }
 
 #[command]
@@ -179,7 +185,8 @@ pub fn run() {
             get_cached_apps,
             clear_all_data,
             restart_app,
-            update_media_notification
+            update_media_notification,
+            check_device_connectivity
         ]);
 
     #[cfg(desktop)]

@@ -153,6 +153,21 @@ pub fn generate_hardware_id(details: &DeviceInfoDetails) -> String {
     format!("roku:fallback:{:x}", hasher.finish())
 }
 
+/// Check if a Roku device is reachable
+pub async fn check_device_connectivity_impl(ip: String, port: u16) -> Result<bool, String> {
+    let url = format!("http://{}:{}/", ip, port);
+    
+    match HTTP_CLIENT
+        .get(&url)
+        .timeout(Duration::from_secs(3))
+        .send()
+        .await
+    {
+        Ok(response) => Ok(response.status().is_success()),
+        Err(_) => Ok(false),
+    }
+}
+
 /// Get media player status with detailed logging
 pub async fn get_media_player_impl(ip: String, port: u16) -> Result<MediaPlayerInfo, String> {
     log::info!("Fetching media player status from {}:{}", ip, port);
