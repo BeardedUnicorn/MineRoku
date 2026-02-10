@@ -6,7 +6,14 @@ import RemoteControl from './RemoteControl';
 import { RokuDevice } from '../store';
 import { invoke } from '@tauri-apps/api/core';
 
-const device: RokuDevice = { name: 'TV', ip: '1.1.1.1', port: 8060, url: 'http://1.1.1.1:8060', status: 'connected' };
+const device: RokuDevice = {
+  name: 'TV',
+  ip: '1.1.1.1',
+  port: 8060,
+  url: 'http://1.1.1.1:8060',
+  hardware_id: 'roku:test-tv',
+  status: 'connected',
+};
 
 vi.mocked(invoke);
 

@@ -1,7 +1,5 @@
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import React, { lazy, Suspense, useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Window } from "@tauri-apps/api/window";
-import { platform } from "@tauri-apps/plugin-os";
 import { iconCache, ICON_CACHE_TTL_MS, ICON_CACHE_LIMIT } from '../iconCache';
 import {
   Box,
@@ -32,35 +30,21 @@ import {
   playbackButtonSpecs,
   powerButtonSpecs,
 } from './RemoteButtonSpecs';
-import MediaPlayerModal from './MediaPlayerModal';
 import { RokuDevice } from '../store';
+import { usePlatform } from '../hooks/usePlatform';
+import {
+  getActiveApp,
+  getAppIcon,
+  getMediaPlayer,
+  sendRokuCommand,
+  updateMediaNotification,
+  type ActiveAppInfo,
+  type MediaPlayerInfo,
+} from '../services/rokuClient';
 
-interface ActiveApp {
-  name: string;
-  id: string;
-}
+const LazyMediaPlayerModal = lazy(() => import('./MediaPlayerModal'));
 
-interface MediaPlayerInfo {
-  state: string;
-  error: boolean;
-  plugin?: {
-    id: string;
-    name: string;
-    bandwidth: string;
-  };
-  format?: {
-    audio: string;
-    captions: string;
-    container: string;
-    drm: string;
-    video: string;
-    video_res: string;
-  };
-  position?: string;
-  duration?: string;
-  is_live?: boolean;
-  runtime?: string;
-}
+type ActiveApp = ActiveAppInfo;
 
 interface RemoteControlProps {
   device: RokuDevice;
@@ -211,7 +195,7 @@ const useActiveAppIcon = (device: RokuDevice, app: ActiveApp | null) => {
 
     const loadIcon = async () => {
       try {
-        const iconData: string = await invoke('get_app_icon', { ip: device.ip, port: device.port, appId: app.id });
+        const iconData = await getAppIcon(device.ip, device.port, app.id);
         if (cancelled) return;
         iconCache.set(cacheKey, { data: iconData, timestamp: Date.now() });
         if (iconCache.size > ICON_CACHE_LIMIT) {
@@ -256,24 +240,11 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
   const [isAppLoading, setIsAppLoading] = useState<boolean>(true);
   const [mediaInfo, setMediaInfo] = useState<MediaPlayerInfo | null>(null);
   const [mediaModalOpen, setMediaModalOpen] = useState(false);
-  const hasLoadedRef = useRef(false);
   const lastDeviceKeyRef = useRef<string | null>(null);
   const busyRef = useRef<Set<string>>(new Set());
   const abortControllerRef = useRef<AbortController | null>(null);
-  const [currentPlatform, setCurrentPlatform] = useState<string | null>(null);
+  const currentPlatform = usePlatform();
   const activeAppIcon = useActiveAppIcon(device, activeApp);
-
-  useEffect(() => {
-    const fetchPlatform = async () => {
-      try {
-        const p = await platform();
-        setCurrentPlatform(p);
-      } catch {
-        setCurrentPlatform(null);
-      }
-    };
-    fetchPlatform();
-  }, []);
 
   const parseTime = (timeStr?: string): number => {
     if (!timeStr) return 0;
@@ -294,8 +265,6 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
   };
 
   useEffect(() => {
-    if (!device) return;
-    
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
@@ -310,7 +279,6 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
 
       if (!isSameDevice) {
         setIsAppLoading(true);
-        hasLoadedRef.current = false;
       }
 
       const timeoutId = window.setTimeout(() => {
@@ -326,17 +294,13 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
           return;
         }
         
-        const appInfo: ActiveApp = await invoke('get_active_app', {
-          ip: device.ip,
-          port: device.port,
-        });
+        const appInfo = await getActiveApp(device.ip, device.port);
         
         if (abortController.signal.aborted) {
           return;
         }
         
         setActiveApp(appInfo);
-        hasLoadedRef.current = true;
       } catch (error) {
         if (abortController.signal.aborted) {
           return;
@@ -367,8 +331,6 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
   }, [device.hardware_id, device.ip, device.port, device.status]);
 
   useEffect(() => {
-    if (!device) return;
-
     let intervalId: number | undefined;
 
     const fetchActiveApp = async () => {
@@ -376,10 +338,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
         return;
       }
       try {
-        const appInfo: ActiveApp = await invoke('get_active_app', {
-          ip: device.ip,
-          port: device.port
-        });
+        const appInfo = await getActiveApp(device.ip, device.port);
         setActiveApp(appInfo);
       } catch {
         // Ignore errors during polling
@@ -392,10 +351,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
         return;
       }
       try {
-        const info: MediaPlayerInfo = await invoke('get_media_player', {
-          ip: device.ip,
-          port: device.port
-        });
+        const info = await getMediaPlayer(device.ip, device.port);
         setMediaInfo(info);
       } catch {
         setMediaInfo(null);
@@ -408,7 +364,6 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
 
     const startPolling = () => {
       if (intervalId) return;
-      fetchAll();
       intervalId = window.setInterval(fetchAll, 2000);
     };
 
@@ -437,11 +392,10 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
       stopPolling();
       unlistenFocusPromise.then((unlisten: () => void) => unlisten());
     };
-  }, [device]);
+  }, [device.hardware_id, device.ip, device.port, device.status]);
 
   const sendCommand = useCallback(
     async (command: string) => {
-      if (!device) return;
       if (device.status && device.status !== 'connected') {
         setFeedback({ message: 'Device appears offline', severity: 'error' });
         return;
@@ -449,11 +403,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
       if (busyRef.current.has(command)) return;
       busyRef.current.add(command);
       try {
-        await invoke('send_roku_command', {
-          ip: device.ip,
-          port: device.port,
-          command,
-        });
+        await sendRokuCommand(device.ip, device.port, command);
       } catch (error) {
         console.error(`Error sending command ${command}:`, error);
         setFeedback({
@@ -464,7 +414,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
         busyRef.current.delete(command);
       }
     },
-    [device]
+    [device.ip, device.port, device.status]
   );
 
   useEffect(() => {
@@ -539,34 +489,40 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
 
   // Update Android media notification when app/media state changes
   useEffect(() => {
-      if (currentPlatform !== 'android') return;
-      if (!device || !activeApp) return;
-      
-      const updateNotification = async () => {
-          try {
-              // Get icon URL if available
-              let iconUrl: string | undefined;
-              if (activeApp.id !== 'roku') {
-                  iconUrl = `http://${device.ip}:${device.port}/query/icon/${activeApp.id}`;
-              }
-              
-              const playing = mediaInfo?.state?.toLowerCase() === 'play' || mediaInfo?.state?.toLowerCase() === 'playing';
-              
-              await invoke('update_media_notification', {
-                  deviceName: device.name,
-                  deviceIp: device.ip,
-                  devicePort: device.port,
-                  appName: activeApp.name,
-                  isPlaying: playing,
-                  appIconUrl: iconUrl,
-              });
-          } catch (e) {
-              console.log('Failed to update media notification:', e);
-          }
-      };
-      
-      updateNotification();
-  }, [device, activeApp, mediaInfo, currentPlatform]);
+    if (currentPlatform !== 'android' || !activeApp) return;
+
+    const updateNotification = async () => {
+      try {
+        const iconUrl =
+          activeApp.id !== 'roku'
+            ? `http://${device.ip}:${device.port}/query/icon/${activeApp.id}`
+            : undefined;
+        const mediaState = mediaInfo?.state?.toLowerCase();
+        const playing = mediaState === 'play' || mediaState === 'playing';
+
+        await updateMediaNotification({
+          deviceName: device.name,
+          deviceIp: device.ip,
+          devicePort: device.port,
+          appName: activeApp.name,
+          isPlaying: playing,
+          appIconUrl: iconUrl,
+        });
+      } catch (error) {
+        console.log('Failed to update media notification:', error);
+      }
+    };
+
+    void updateNotification();
+  }, [
+    currentPlatform,
+    device.name,
+    device.ip,
+    device.port,
+    activeApp?.id,
+    activeApp?.name,
+    mediaInfo?.state,
+  ]);
 
   const systemButtons = useMemo<CommandSpec[]>(() => systemButtonSpecs, []);
   const volumeButtons = useMemo<CommandSpec[]>(() => volumeButtonSpecs, []);
@@ -794,11 +750,15 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
         </Typography>
       )}
 
-      <MediaPlayerModal
-        open={mediaModalOpen}
-        onClose={() => setMediaModalOpen(false)}
-        device={device}
-      />
+      {mediaModalOpen && (
+        <Suspense fallback={null}>
+          <LazyMediaPlayerModal
+            open={mediaModalOpen}
+            onClose={() => setMediaModalOpen(false)}
+            device={device}
+          />
+        </Suspense>
+      )}
 
       <Snackbar open={!!feedback} autoHideDuration={3000} onClose={() => setFeedback(null)} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }} >
         <Alert onClose={() => setFeedback(null)} severity={feedback?.severity} sx={{ width: '100%' }} >

@@ -6,12 +6,23 @@ import { renderWithTheme } from '../testUtils';
 import { useAppStore, RokuDevice } from '../store';
 import { invoke } from '@tauri-apps/api/core';
 
-const device: RokuDevice = { name: 'TV', ip: '1.1.1.1', port: 8060, url: 'http://1.1.1.1:8060', status: 'connected' };
+const device: RokuDevice = {
+  name: 'TV',
+  ip: '1.1.1.1',
+  port: 8060,
+  url: 'http://1.1.1.1:8060',
+  hardware_id: 'roku:test-tv',
+  status: 'connected',
+};
 
 vi.mocked(invoke);
 
 beforeEach(() => {
-  useAppStore.setState({ devices: [device], selectedDevice: device, favoriteApps: { [device.ip]: [] } });
+  useAppStore.setState({
+    devices: [device],
+    selectedDevice: device,
+    favoriteApps: { [device.hardware_id]: [] },
+  });
   vi.mocked(invoke).mockReset();
 });
 
@@ -37,10 +48,14 @@ describe('AppLauncher', () => {
     expect(await screen.findByText('Netflix')).toBeInTheDocument();
 
     await userEvent.click(screen.getAllByRole('button', { name: /launch/i })[0]);
-    expect(invoke).toHaveBeenCalledWith('launch_roku_app', { ip: device.ip, port: device.port, app_id: '1' });
+    expect(invoke).toHaveBeenCalledWith('launch_roku_app', {
+      ip: device.ip,
+      port: device.port,
+      app_id: '1',
+    });
 
     await userEvent.click(screen.getAllByLabelText(/add to favorites|remove from favorites/i)[0]);
-    expect(useAppStore.getState().favoriteApps[device.ip]).toContain('1');
+    expect(useAppStore.getState().favoriteApps[device.hardware_id]).toContain('1');
 
     await userEvent.type(screen.getByLabelText(/search apps/i), 'Nope');
     expect(await screen.findByText(/no matching apps/i)).toBeInTheDocument();

@@ -1,5 +1,4 @@
-import React, { useState, useEffect } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
     Dialog,
     DialogTitle,
@@ -25,28 +24,7 @@ import {
     Error as ErrorIcon,
 } from '@mui/icons-material';
 import { RokuDevice } from '../store';
-
-interface MediaPlayerInfo {
-    state: string;
-    error: boolean;
-    plugin?: {
-        id: string;
-        name: string;
-        bandwidth: string;
-    };
-    format?: {
-        audio: string;
-        captions: string;
-        container: string;
-        drm: string;
-        video: string;
-        video_res: string;
-    };
-    position?: string;
-    duration?: string;
-    is_live?: boolean;
-    runtime?: string;
-}
+import { getMediaPlayer, type MediaPlayerInfo } from '../services/rokuClient';
 
 interface MediaPlayerModalProps {
     open: boolean;
@@ -60,15 +38,10 @@ const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({ open, onClose, devi
     const [mediaInfo, setMediaInfo] = useState<MediaPlayerInfo | null>(null);
     const [refreshing, setRefreshing] = useState(false);
 
-    const fetchMediaPlayerInfo = async () => {
+    const fetchMediaPlayerInfo = useCallback(async () => {
         try {
             setRefreshing(true);
-            console.log('Fetching media player info for device:', device);
-            const info: MediaPlayerInfo = await invoke('get_media_player', {
-                ip: device.ip,
-                port: device.port,
-            });
-            console.log('Received media player info:', info);
+            const info = await getMediaPlayer(device.ip, device.port);
             setMediaInfo(info);
             setError(null);
         } catch (err) {
@@ -84,18 +57,20 @@ const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({ open, onClose, devi
             setLoading(false);
             setRefreshing(false);
         }
-    };
+    }, [device.ip, device.port]);
 
     useEffect(() => {
         if (open) {
             setLoading(true);
             setError(null);
-            fetchMediaPlayerInfo();
+            void fetchMediaPlayerInfo();
 
-            const interval = setInterval(fetchMediaPlayerInfo, 2000);
+            const interval = setInterval(() => {
+                void fetchMediaPlayerInfo();
+            }, 2000);
             return () => clearInterval(interval);
         }
-    }, [open, device.ip, device.port]);
+    }, [open, fetchMediaPlayerInfo]);
 
     const parseTime = (timeStr?: string): number => {
         if (!timeStr) return 0;

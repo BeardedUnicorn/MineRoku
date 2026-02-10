@@ -1,6 +1,4 @@
 import React from 'react';
-import { invoke } from '@tauri-apps/api/core';
-import { platform } from '@tauri-apps/plugin-os';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { useAppStore, RokuDevice } from '../store';
 import { iconCache } from '../iconCache';
@@ -16,6 +14,8 @@ import {
     Info as InfoIcon,
     DeleteForever as DeleteForeverIcon
 } from '@mui/icons-material';
+import { usePlatform } from '../hooks/usePlatform';
+import { clearAllData, restartApp } from '../services/rokuClient';
 
 interface SidebarProps {
     isOpen: boolean;
@@ -40,19 +40,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, scanForDevices, isS
     const [settingsOpen, setSettingsOpen] = React.useState(false);
     const [confirmDeleteOpen, setConfirmDeleteOpen] = React.useState(false);
     const [isDeleting, setIsDeleting] = React.useState(false);
-    const [currentPlatform, setCurrentPlatform] = React.useState<string | null>(null);
-
-    React.useEffect(() => {
-        const fetchPlatform = async () => {
-            try {
-                const p = await platform();
-                setCurrentPlatform(p);
-            } catch {
-                setCurrentPlatform(null);
-            }
-        };
-        fetchPlatform();
-    }, []);
+    const currentPlatform = usePlatform();
 
     const handleDeviceSelect = (device: RokuDevice) => {
         setSelectedDevice(device);
@@ -65,7 +53,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, scanForDevices, isS
         setIsDeleting(true);
         try {
             // Clear backend database
-            await invoke('clear_all_data');
+            await clearAllData();
         } catch (error) {
             console.error('Failed to delete data:', error);
         }
@@ -96,7 +84,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, scanForDevices, isS
 
         try {
             // Restart the app (desktop)
-            await invoke('restart_app');
+            await restartApp();
         } catch (error) {
             console.error('Failed to restart app:', error);
             setIsDeleting(false);

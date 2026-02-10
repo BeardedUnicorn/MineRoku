@@ -1,5 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import React, { useState, useEffect, useRef, useCallback, useDeferredValue, useMemo } from 'react';
 import {
     Box,
     Typography,
@@ -26,12 +25,13 @@ import {
 } from '@mui/icons-material';
 import { useAppStore, RokuDevice } from '../store';
 import { iconCache, ICON_CACHE_TTL_MS, ICON_CACHE_LIMIT } from '../iconCache';
-
-interface RokuApp {
-    id: string;
-    name: string;
-    version: string;
-}
+import {
+    getAppIcon,
+    getCachedApps,
+    launchRokuApp,
+    listRokuApps,
+    type RokuApp,
+} from '../services/rokuClient';
 
 interface AppLauncherProps {
     device: RokuDevice;
@@ -63,9 +63,14 @@ const AppIcon: React.FC<{ device: RokuDevice; appId: string; appName: string; si
             iconCache.delete(cacheKey);
         }
 
+        let cancelled = false;
+
         const fetchIcon = async () => {
             try {
-                const iconData: string = await invoke('get_app_icon', { ip: device.ip, port: device.port, appId });
+                const iconData = await getAppIcon(device.ip, device.port, appId);
+                if (cancelled) {
+                    return;
+                }
                 iconCache.set(cacheKey, { data: iconData, timestamp: Date.now() });
                 if (iconCache.size > ICON_CACHE_LIMIT) {
                     const oldestKey = iconCache.keys().next().value as string;
@@ -73,11 +78,17 @@ const AppIcon: React.FC<{ device: RokuDevice; appId: string; appName: string; si
                 }
                 setIcon(iconData);
             } catch (error) {
-                console.error(`Error fetching icon for ${appName}:`, error);
+                if (!cancelled) {
+                    console.error(`Error fetching icon for ${appName}:`, error);
+                }
             }
         };
 
-        fetchIcon();
+        void fetchIcon();
+
+        return () => {
+            cancelled = true;
+        };
     }, [device.ip, device.port, appId, appName, cacheKey]);
 
     const sxProps = {
@@ -122,9 +133,18 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
         toggleFavoriteApp: state.toggleFavoriteApp,
     }));
 
-    const favoriteAppDetails = favoriteApps
-        .map(favId => apps.find(app => app.id === favId))
-        .filter((app): app is RokuApp => !!app);
+    const favoriteAppDetails = useMemo(() => {
+        if (favoriteApps.length === 0 || apps.length === 0) {
+            return [] as RokuApp[];
+        }
+        const appById = new Map(apps.map((app) => [app.id, app]));
+        return favoriteApps
+            .map((favId) => appById.get(favId))
+            .filter((app): app is RokuApp => Boolean(app));
+    }, [favoriteApps, apps]);
+
+    const favoriteAppIds = useMemo(() => new Set(favoriteApps), [favoriteApps]);
+    const deferredSearchTerm = useDeferredValue(searchTerm.trim().toLowerCase());
 
     // Calculate responsive items per page based on container size
     const calculateItemsPerPage = useCallback(() => {
@@ -218,41 +238,41 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
         setItemsPerPage(newItemsPerPage);
     }, [favoriteAppDetails.length, calculateItemsPerPage]);
 
-    const fetchApps = async (retryCount = 0) => {
+    const fetchApps = useCallback(async (retryCount = 0) => {
         setIsLoading(true);
         setCurrentPage(1);
         try {
             if (device.status && device.status !== 'connected') {
-                setIsLoading(false);
                 return;
             }
-            const rokuApps: RokuApp[] = await invoke('list_roku_apps', {
-                ip: device.ip,
-                port: device.port,
-            });
-            
+
+            const rokuApps = await listRokuApps(device.ip, device.port);
             if (rokuApps.length === 0 && retryCount === 0) {
                 console.log('No apps found, retrying in 2 seconds...');
-                setTimeout(() => fetchApps(1), 2000);
+                window.setTimeout(() => {
+                    void fetchApps(1);
+                }, 2000);
                 return;
             }
-            
-            setApps(rokuApps.sort((a, b) => a.name.localeCompare(b.name)));
+
+            setApps([...rokuApps].sort((a, b) => a.name.localeCompare(b.name)));
         } catch (error) {
             console.error('Error fetching apps:', error);
             const errorMessage = typeof error === 'string' ? error : 'An unknown error occurred.';
-            
+
             if (errorMessage.includes('parse') && retryCount === 0) {
                 console.log('Parse error encountered, retrying in 2 seconds...');
-                setTimeout(() => fetchApps(1), 2000);
+                window.setTimeout(() => {
+                    void fetchApps(1);
+                }, 2000);
                 return;
             }
-            
+
             setFeedback({ message: `Error fetching apps: ${errorMessage}`, severity: 'error' });
         } finally {
             setIsLoading(false);
         }
-    };
+    }, [device.ip, device.port, device.status]);
 
     const launchApp = async (appId: string, appName: string) => {
         if (device.status && device.status !== 'connected') {
@@ -261,11 +281,7 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
         }
         setIsLaunching(appId);
         try {
-            await invoke('launch_roku_app', {
-                ip: device.ip,
-                port: device.port,
-                appId,
-            });
+            await launchRokuApp(device.ip, device.port, appId);
             setFeedback({ message: `Launched "${appName}"`, severity: 'success' });
         } catch (error) {
             console.error(`Error launching app:`, error);
@@ -281,54 +297,68 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
         setCurrentPage(1);
     }, [searchTerm]);
 
-    // Reset to page 1 when items per page changes (if current page would be out of bounds)
-    useEffect(() => {
-        const filteredCount = apps.filter(app =>
-            app.name.toLowerCase().includes(searchTerm.toLowerCase())
-        ).length;
-        const maxPage = Math.max(1, Math.ceil(filteredCount / itemsPerPage));
-        if (currentPage > maxPage) {
-            setCurrentPage(maxPage);
+    const filteredApps = useMemo(() => {
+        if (!deferredSearchTerm) {
+            return apps;
         }
-    }, [itemsPerPage, apps, searchTerm, currentPage]);
+        return apps.filter((app) => app.name.toLowerCase().includes(deferredSearchTerm));
+    }, [apps, deferredSearchTerm]);
+
+    const pageCount = Math.max(1, Math.ceil(filteredApps.length / itemsPerPage));
+
+    // Reset to a valid page when data shape changes
+    useEffect(() => {
+        if (currentPage > pageCount) {
+            setCurrentPage(pageCount);
+        }
+    }, [itemsPerPage, currentPage, pageCount]);
 
     useEffect(() => {
-        if (!device) return;
+        let cancelled = false;
+        let liveSettled = false;
 
-        // Load cached apps immediately
-        (async () => {
+        const livePromise =
+            !device.status || device.status === 'connected'
+                ? fetchApps().finally(() => {
+                      liveSettled = true;
+                  })
+                : null;
+
+        const loadCached = async () => {
             try {
-                const cached: RokuApp[] = await invoke('get_cached_apps', { ip: device.ip });
-                if (cached && cached.length) {
-                    setApps(cached.sort((a, b) => a.name.localeCompare(b.name)));
+                const cached = await getCachedApps(device.ip);
+                if (cancelled || liveSettled) {
+                    return;
+                }
+                if (cached.length > 0) {
+                    setApps([...cached].sort((a, b) => a.name.localeCompare(b.name)));
                 } else {
                     setApps([]);
                 }
             } catch {
-                // Non-fatal; fall back to live fetch
+                // Non-fatal; fall back to live fetch.
             }
-        })();
+        };
 
-        // Fetch live apps when device is connected
-        if (!device.status || device.status === 'connected') {
-            fetchApps();
-        }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [device.ip, device.port, device.status]);
+        void loadCached();
+        void livePromise;
 
-    const filteredApps = apps.filter(app =>
-        app.name.toLowerCase().includes(searchTerm.toLowerCase())
+        return () => {
+            cancelled = true;
+        };
+    }, [device.ip, device.status, fetchApps]);
+
+    const paginatedApps = useMemo(
+        () => filteredApps.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage),
+        [filteredApps, currentPage, itemsPerPage]
     );
-
-    const pageCount = Math.ceil(filteredApps.length / itemsPerPage);
-    const paginatedApps = filteredApps.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
     
     const handlePageChange = (_event: React.ChangeEvent<unknown>, value: number) => {
         setCurrentPage(value);
     };
 
     const handleRefreshClick = () => {
-        fetchApps();
+        void fetchApps();
     };
 
     return (
@@ -436,9 +466,9 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
                                             >
                                                 {isLaunching === app.id ? 'Launching...' : 'Launch'}
                                             </Button>
-                                            <Tooltip title={favoriteApps.includes(app.id) ? "Remove from favorites" : "Add to favorites"}>
+                                            <Tooltip title={favoriteAppIds.has(app.id) ? "Remove from favorites" : "Add to favorites"}>
                                                 <IconButton onClick={() => toggleFavoriteApp(device.hardware_id, app.id)}>
-                                                    {favoriteApps.includes(app.id) ? <StarIcon color="primary" /> : <StarBorderIcon />}
+                                                    {favoriteAppIds.has(app.id) ? <StarIcon color="primary" /> : <StarBorderIcon />}
                                                 </IconButton>
                                             </Tooltip>
                                         </Box>

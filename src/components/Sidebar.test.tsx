@@ -4,16 +4,21 @@ import { screen } from '@testing-library/react';
 import Sidebar from './Sidebar';
 import { renderWithTheme } from '../testUtils';
 import { useAppStore, RokuDevice } from '../store';
-import { invoke } from '@tauri-apps/api/core';
-
-vi.mocked(invoke);
+import { openUrl } from '@tauri-apps/plugin-opener';
 
 describe('Sidebar', () => {
-  const device: RokuDevice = { name: 'Living Room', ip: '1.1.1.1', port: 8060, url: 'http://1.1.1.1:8060', status: 'connected' };
+  const device: RokuDevice = {
+    name: 'Living Room',
+    ip: '1.1.1.1',
+    port: 8060,
+    url: 'http://1.1.1.1:8060',
+    hardware_id: 'roku:living-room',
+    status: 'connected',
+  };
 
   beforeEach(() => {
     useAppStore.setState({ devices: [device], selectedDevice: null, favoriteApps: {} });
-    vi.mocked(invoke).mockReset();
+    vi.mocked(openUrl).mockReset();
   });
 
   it('renders devices and handles selection and refresh', async () => {
@@ -35,13 +40,12 @@ describe('Sidebar', () => {
     expect(scanForDevices).toHaveBeenCalled();
   });
 
-  it('opens popup window', async () => {
+  it('opens the about link', async () => {
     const scanForDevices = vi.fn();
     renderWithTheme(<Sidebar isOpen onToggle={() => {}} scanForDevices={scanForDevices} isScanning={false} />);
 
-    // Multiple controls may share the same label; retrieve the first.
-    const [openBtn] = screen.getAllByLabelText(/open remote in new window/i);
-    await userEvent.click(openBtn);
-    expect(invoke).toHaveBeenCalledWith('open_popup_window');
+    const [aboutBtn] = screen.getAllByLabelText(/about/i);
+    await userEvent.click(aboutBtn);
+    expect(openUrl).toHaveBeenCalledWith('https://github.com/mherold1/roku-controller');
   });
 });

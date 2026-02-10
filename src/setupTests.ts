@@ -37,6 +37,10 @@ vi.mock('@tauri-apps/plugin-os', () => ({
   platform: vi.fn(() => Promise.resolve('linux')),
 }));
 
+vi.mock('@tauri-apps/plugin-opener', () => ({
+  openUrl: vi.fn(),
+}));
+
 // Mock out react-transition-group to avoid running animations during tests.
 vi.mock('react-transition-group', () => ({
   TransitionGroup: ({ children }: { children: React.ReactNode }) => React.createElement(React.Fragment, null, children),
