@@ -117,7 +117,7 @@ export async function sendRokuCommand(
 }
 
 export async function launchRokuApp(ip: string, port: number, appId: string): Promise<string> {
-  return invoke<string>('launch_roku_app', { ip, port, app_id: appId });
+  return invoke<string>('launch_roku_app', { ip, port, appId });
 }
 
 export async function getActiveApp(ip: string, port: number): Promise<ActiveAppInfo> {
@@ -131,7 +131,7 @@ export async function getAppIcon(ip: string, port: number, appId: string): Promi
     return inFlight;
   }
 
-  const request = enqueueIconRequest(() => invoke<string>('get_app_icon', { ip, port, app_id: appId }))
+  const request = enqueueIconRequest(() => invoke<string>('get_app_icon', { ip, port, appId }))
     .finally(() => {
       iconInFlight.delete(requestKey);
     });
