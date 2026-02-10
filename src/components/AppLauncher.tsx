@@ -16,13 +16,11 @@ import {
     IconButton,
     Divider
 } from '@mui/material';
-import {
-    Refresh as RefreshIcon,
-    Launch as LaunchIcon,
-    Search as SearchIcon,
-    Star as StarIcon,
-    StarBorder as StarBorderIcon,
-} from '@mui/icons-material';
+import RefreshIcon from '@mui/icons-material/Refresh';
+import LaunchIcon from '@mui/icons-material/Launch';
+import SearchIcon from '@mui/icons-material/Search';
+import StarIcon from '@mui/icons-material/Star';
+import StarBorderIcon from '@mui/icons-material/StarBorder';
 import { useAppStore, RokuDevice } from '../store';
 import { iconCache, ICON_CACHE_TTL_MS, ICON_CACHE_LIMIT } from '../iconCache';
 import {

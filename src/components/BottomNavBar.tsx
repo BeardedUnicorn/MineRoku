@@ -1,7 +1,8 @@
 
 import React from 'react';
 import { BottomNavigation, BottomNavigationAction, Paper } from '@mui/material';
-import { Apps as AppsIcon, SettingsRemote as RemoteControlIcon } from '@mui/icons-material';
+import AppsIcon from '@mui/icons-material/Apps';
+import RemoteControlIcon from '@mui/icons-material/SettingsRemote';
 
 interface BottomNavBarProps {
     view: 'remote' | 'apps';

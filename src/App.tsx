@@ -16,12 +16,10 @@ import {
   Tooltip,
 } from '@mui/material';
 import { motion } from 'framer-motion';
-import {
-  Tv as TvIcon,
-  SearchOff as SearchOffIcon,
-  Menu as MenuIcon,
-  Refresh as RefreshIcon,
-} from '@mui/icons-material';
+import TvIcon from '@mui/icons-material/Tv';
+import SearchOffIcon from '@mui/icons-material/SearchOff';
+import MenuIcon from '@mui/icons-material/Menu';
+import RefreshIcon from '@mui/icons-material/Refresh';
 import BottomNavBar from './components/BottomNavBar';
 import './App.css';
 import { useAppStore, type RokuDevice } from './store';

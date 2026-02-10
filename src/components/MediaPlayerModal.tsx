@@ -15,14 +15,12 @@ import {
     Divider,
     GridLegacy as Grid,
 } from '@mui/material';
-import {
-    Close as CloseIcon,
-    PlayArrow as PlayIcon,
-    Pause as PauseIcon,
-    Stop as StopIcon,
-    LiveTv as LiveIcon,
-    Error as ErrorIcon,
-} from '@mui/icons-material';
+import CloseIcon from '@mui/icons-material/Close';
+import PlayIcon from '@mui/icons-material/PlayArrow';
+import PauseIcon from '@mui/icons-material/Pause';
+import StopIcon from '@mui/icons-material/Stop';
+import LiveIcon from '@mui/icons-material/LiveTv';
+import ErrorIcon from '@mui/icons-material/Error';
 import { RokuDevice } from '../store';
 import { getMediaPlayer, type MediaPlayerInfo } from '../services/rokuClient';
 

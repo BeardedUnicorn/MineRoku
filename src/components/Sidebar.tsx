@@ -8,12 +8,10 @@ import {
     Typography, Box, IconButton, Divider, CircularProgress, Tooltip, useTheme, useMediaQuery,
     Dialog, DialogTitle, DialogContent, DialogActions, FormControlLabel, Switch, Stack, Button
 } from '@mui/material';
-import {
-    Refresh as RefreshIcon,
-    Settings as SettingsIcon,
-    Info as InfoIcon,
-    DeleteForever as DeleteForeverIcon
-} from '@mui/icons-material';
+import RefreshIcon from '@mui/icons-material/Refresh';
+import SettingsIcon from '@mui/icons-material/Settings';
+import InfoIcon from '@mui/icons-material/Info';
+import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
 import { usePlatform } from '../hooks/usePlatform';
 import { clearAllData, restartApp } from '../services/rokuClient';
 
