@@ -3,6 +3,7 @@ import {
     Box,
     Typography,
     Card,
+    CardActionArea,
     CardContent,
     CardMedia,
     CircularProgress,
@@ -103,6 +104,8 @@ const AppIcon: React.FC<{ device: RokuDevice; appId: string; appName: string; si
                 <img
                     src={icon}
                     alt={appName}
+                    width={size}
+                    height={size}
                     style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain' }}
                     loading="lazy"
                 />
@@ -376,11 +379,8 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
                         {favoriteAppDetails.map((app) => (
                             <Box key={`fav-${app.id}`}>
                                 <Tooltip title={`Launch ${app.name}`}>
-                                    <Card 
-                                        onClick={() => launchApp(app.id, app.name)}
-                                        sx={{ 
-                                            p: 1, 
-                                            cursor: 'pointer', 
+                                    <Card
+                                        sx={{
                                             transition: 'transform 0.2s, box-shadow 0.2s',
                                             '&:hover': {
                                                 transform: 'scale(1.05)',
@@ -388,7 +388,13 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
                                             }
                                         }}
                                     >
-                                        <AppIcon device={device} appId={app.id} appName={app.name} size={64} />
+                                        <CardActionArea
+                                            onClick={() => launchApp(app.id, app.name)}
+                                            aria-label={`Launch ${app.name}`}
+                                            sx={{ p: 1, borderRadius: 1, touchAction: 'manipulation' }}
+                                        >
+                                            <AppIcon device={device} appId={app.id} appName={app.name} size={64} />
+                                        </CardActionArea>
                                     </Card>
                                 </Tooltip>
                             </Box>
@@ -462,10 +468,15 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
                                                 disabled={isLaunching === app.id}
                                                 startIcon={isLaunching === app.id ? <CircularProgress color="inherit" size={16} /> : <LaunchIcon />}
                                             >
-                                                {isLaunching === app.id ? 'Launching...' : 'Launch'}
+                                                {isLaunching === app.id ? 'Launching…' : 'Launch'}
                                             </Button>
                                             <Tooltip title={favoriteAppIds.has(app.id) ? "Remove from favorites" : "Add to favorites"}>
-                                                <IconButton onClick={() => toggleFavoriteApp(device.hardware_id, app.id)}>
+                                                <IconButton
+                                                    aria-label={favoriteAppIds.has(app.id)
+                                                        ? `Remove ${app.name} from Favorites`
+                                                        : `Add ${app.name} to Favorites`}
+                                                    onClick={() => toggleFavoriteApp(device.hardware_id, app.id)}
+                                                >
                                                     {favoriteAppIds.has(app.id) ? <StarIcon color="primary" /> : <StarBorderIcon />}
                                                 </IconButton>
                                             </Tooltip>

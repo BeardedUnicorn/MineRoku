@@ -1,4 +1,26 @@
+html {
+  color-scheme: dark;
+}
+
 html, body, #root {
   height: 100%;
   margin: 0;
+}
+
+.skip-link {
+  position: absolute;
+  left: 16px;
+  top: -48px;
+  z-index: 1400;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #121212;
+  text-decoration: none;
+  font-weight: 600;
+  transition: top 0.2s ease;
+}
+
+.skip-link:focus-visible {
+  top: 16px;
 }

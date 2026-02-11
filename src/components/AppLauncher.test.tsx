@@ -54,8 +54,17 @@ describe('AppLauncher', () => {
       appId: '1',
     });
 
-    await userEvent.click(screen.getAllByLabelText(/add to favorites|remove from favorites/i)[0]);
+    await userEvent.click(screen.getByRole('button', { name: /add netflix to favorites/i }));
     expect(useAppStore.getState().favoriteApps[device.hardware_id]).toContain('1');
+
+    const favoriteLaunchButton = await screen.findByRole('button', { name: /launch netflix/i });
+    favoriteLaunchButton.focus();
+    await userEvent.keyboard('{Enter}');
+    expect(invoke).toHaveBeenCalledWith('launch_roku_app', {
+      ip: device.ip,
+      port: device.port,
+      appId: '1',
+    });
 
     await userEvent.type(screen.getByLabelText(/search apps/i), 'Nope');
     expect(await screen.findByText(/no matching apps/i)).toBeInTheDocument();

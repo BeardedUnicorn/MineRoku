@@ -63,4 +63,13 @@ describe('RemoteControl', () => {
     await userEvent.click(playBtn);
     expect(await screen.findByText(/error/i)).toBeInTheDocument();
   });
+
+  it('opens media player status from an accessible button control', async () => {
+    renderWithTheme(<RemoteControl device={device} />);
+
+    const [statusButton] = await screen.findAllByRole('button', { name: /open media player status/i });
+    await userEvent.click(statusButton);
+
+    expect(await screen.findByText(/media player status/i)).toBeInTheDocument();
+  });
 });

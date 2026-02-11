@@ -24,6 +24,11 @@ html, body, #root {
   flex-direction: column;
 }
 
+.main-content:focus-visible {
+  outline: 2px solid #8e65cf;
+  outline-offset: 2px;
+}
+
 h1 {
   color: #673AB7; /* Roku purple */
   margin-bottom: 24px; /* Adjust spacing */

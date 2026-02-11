@@ -2,6 +2,7 @@ import React, { lazy, Suspense, useState, useEffect, useCallback, useRef, useMem
 import { iconCache, ICON_CACHE_TTL_MS, ICON_CACHE_LIMIT } from '../iconCache';
 import {
   Button,
+  ButtonBase,
   Box,
   Paper,
   Typography,
@@ -622,23 +623,26 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
       )}
 
       <Box sx={{ width: '100%' }}>
-        <Box sx={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 1.5,
-          minHeight: 40,
-          px: 2,
-          py: 1,
-          borderRadius: 2,
-          backgroundColor: 'action.hover',
-          cursor: 'pointer',
-          transition: 'background-color 0.2s',
-          '&:hover': {
-            backgroundColor: 'action.selected',
-          }
-        }}
+        <ButtonBase
+          aria-label="Open Media Player Status"
           onClick={() => setMediaModalOpen(true)}
+          sx={{
+            width: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 1.5,
+            minHeight: 40,
+            px: 2,
+            py: 1,
+            borderRadius: 2,
+            backgroundColor: 'action.hover',
+            transition: 'background-color 0.2s',
+            touchAction: 'manipulation',
+            '&:hover': {
+              backgroundColor: 'action.selected',
+            },
+          }}
         >
           {isAppLoading ? (
             <CircularProgress size={20} />
@@ -654,7 +658,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
               Home Screen
             </Typography>
           )}
-        </Box>
+        </ButtonBase>
 
         {showProgress && (
           <Box sx={{mt: 1.5 }}>

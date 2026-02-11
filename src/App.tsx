@@ -192,7 +192,7 @@ const App: React.FC = () => {
 
       setIsScanning(true);
       setIsSearching(true);
-      setScanStatus('Scanning network...');
+      setScanStatus('Scanning network…');
 
       try {
         const foundDevices = await discoverRokuDevices();
@@ -359,10 +359,12 @@ const App: React.FC = () => {
             height: '100%',
             gap: 2,
           }}
+          role="status"
+          aria-live="polite"
         >
           <CircularProgress />
           <Typography variant="h6" color="text.secondary">
-            Searching for Roku devices...
+            Searching for Roku devices…
           </Typography>
           {scanStatus && (
             <Typography variant="body2" color="text.secondary">
@@ -396,7 +398,7 @@ const App: React.FC = () => {
             refresh to scan again.
           </Typography>
           {scanStatus && (
-            <Typography variant="body2" color="error" sx={{ mt: 1 }}>
+            <Typography variant="body2" color="error" sx={{ mt: 1 }} aria-live="polite">
               {scanStatus}
             </Typography>
           )}
@@ -407,7 +409,7 @@ const App: React.FC = () => {
             onClick={scanForDevices}
             disabled={isScanning}
           >
-            {isScanning ? 'Scanning...' : 'Refresh'}
+            {isScanning ? 'Scanning…' : 'Refresh'}
           </Button>
           {discoveryPermissionBlocked && (
             <Button
@@ -485,8 +487,13 @@ const App: React.FC = () => {
             <IconButton edge="start" color="inherit" aria-label="menu" onClick={handleToggleSidebar} sx={{ mr: 2 }}>
               <MenuIcon />
             </IconButton>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexGrow: 1 }}>
-              <Typography variant="h6" component="div" sx={{ color: 'primary.main', fontWeight: 'bold' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexGrow: 1, minWidth: 0 }}>
+              <Typography
+                variant="h6"
+                component="h1"
+                noWrap
+                sx={{ color: 'primary.main', fontWeight: 'bold', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}
+              >
                 {selectedDevice ? selectedDevice.name : 'Roku Remote'}
               </Typography>
               {selectedDevice && (
@@ -507,7 +514,12 @@ const App: React.FC = () => {
           </Toolbar>
         </AppBar>
 
-        <Box component="main" className={`main-content ${isMobile && selectedDevice ? 'main-content-mobile' : ''}`}>
+        <Box
+          component="main"
+          id="main-content"
+          tabIndex={-1}
+          className={`main-content ${isMobile && selectedDevice ? 'main-content-mobile' : ''}`}
+        >
           <Box
             sx={{
               display: 'flex',
