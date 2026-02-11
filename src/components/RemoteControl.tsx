@@ -618,12 +618,14 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
         alignItems: 'center',
         gap: { xs: 1.5, sm: 2 },
         backgroundImage: remoteBackground,
-        backgroundSize: activeAppIcon ? 'cover' : 'auto',
-        backgroundPosition: 'center',
-        backgroundRepeat: 'no-repeat',
+        backgroundSize: activeAppIcon ? 'cover, cover' : 'auto',
+        backgroundPosition: activeAppIcon ? 'center, center' : 'center',
+        backgroundRepeat: activeAppIcon ? 'no-repeat, no-repeat' : 'no-repeat',
+        backgroundClip: 'padding-box',
         border: styleTokens.cardBorder,
         backdropFilter: styleTokens.cardBackdropFilter,
         boxShadow: styleTokens.cardShadow,
+        overflow: 'hidden',
       }}
     >
       <Typography
