@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithTheme } from '../testUtils';
 import RemoteControl from './RemoteControl';
-import { RokuDevice } from '../store';
+import { RokuDevice, useAppStore } from '../store';
 import { invoke } from '@tauri-apps/api/core';
 
 const device: RokuDevice = {
@@ -30,6 +30,7 @@ beforeEach(() => {
     }
     return Promise.resolve();
   });
+  useAppStore.setState({ remoteStyle: 'classic' });
 });
 
 describe('RemoteControl', () => {
@@ -71,5 +72,20 @@ describe('RemoteControl', () => {
     await userEvent.click(statusButton);
 
     expect(await screen.findByText(/media player status/i)).toBeInTheDocument();
+  });
+
+  it('applies remote style tokens from global settings', async () => {
+    renderWithTheme(<RemoteControl device={device} />);
+
+    const shells = await screen.findAllByTestId('remote-control-shell');
+    const shell = shells[shells.length - 1];
+    expect(shell).toHaveAttribute('data-remote-style', 'classic');
+
+    useAppStore.getState().setRemoteStyle('studio');
+
+    await waitFor(() => {
+      const updated = screen.getAllByTestId('remote-control-shell');
+      expect(updated[updated.length - 1]).toHaveAttribute('data-remote-style', 'studio');
+    });
   });
 });

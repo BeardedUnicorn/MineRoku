@@ -1,12 +1,13 @@
 import React from 'react';
 import { openUrl } from '@tauri-apps/plugin-opener';
-import { useAppStore, RokuDevice } from '../store';
+import { remoteStylePresets, type RemoteStylePreset, useAppStore, RokuDevice } from '../store';
 import { iconCache } from '../iconCache';
 import { shallow } from 'zustand/shallow';
 import {
     Drawer, List, ListItemButton, ListItemText,
     Typography, Box, IconButton, Divider, CircularProgress, Tooltip, useTheme, useMediaQuery,
-    Dialog, DialogTitle, DialogContent, DialogActions, FormControlLabel, Switch, Stack, Button
+    Dialog, DialogTitle, DialogContent, DialogActions, FormControlLabel, Switch, Stack, Button,
+    FormControl, InputLabel, Select, MenuItem
 } from '@mui/material';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import SettingsIcon from '@mui/icons-material/Settings';
@@ -14,6 +15,7 @@ import InfoIcon from '@mui/icons-material/Info';
 import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
 import { usePlatform } from '../hooks/usePlatform';
 import { clearAllData, restartApp } from '../services/rokuClient';
+import { remoteStyleLabels } from './remoteStyleTokens';
 
 interface SidebarProps {
     isOpen: boolean;
@@ -32,6 +34,8 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, scanForDevices, isS
     const setPreferLastUsed = useAppStore((s) => s.setPreferLastUsed);
     const showAllDevices = useAppStore((s) => s.showAllDevices);
     const setShowAllDevices = useAppStore((s) => s.setShowAllDevices);
+    const remoteStyle = useAppStore((s) => s.remoteStyle);
+    const setRemoteStyle = useAppStore((s) => s.setRemoteStyle);
     const resetState = useAppStore((s) => s.resetState);
     const theme = useTheme();
     const isMobile = useMediaQuery(theme.breakpoints.down('md'));
@@ -237,6 +241,25 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, scanForDevices, isS
                     />
                     <Typography variant="caption" color="text.secondary">
                         When disabled, only connected devices are shown. Your selected device stays visible even if it goes offline.
+                    </Typography>
+                    <FormControl fullWidth size="small">
+                        <InputLabel id="remote-style-label">Remote style</InputLabel>
+                        <Select
+                            labelId="remote-style-label"
+                            id="remote-style"
+                            label="Remote style"
+                            value={remoteStyle}
+                            onChange={(e) => setRemoteStyle(e.target.value as RemoteStylePreset)}
+                        >
+                            {remoteStylePresets.map((style) => (
+                                <MenuItem key={style} value={style}>
+                                    {remoteStyleLabels[style]}
+                                </MenuItem>
+                            ))}
+                        </Select>
+                    </FormControl>
+                    <Typography variant="caption" color="text.secondary">
+                        Applies to the remote on mobile and desktop.
                     </Typography>
                     
                     <Divider sx={{ my: 2 }} />

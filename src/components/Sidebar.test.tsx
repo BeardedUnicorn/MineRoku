@@ -23,6 +23,7 @@ describe('Sidebar', () => {
       favoriteApps: {},
       preferLastUsed: true,
       showAllDevices: true,
+      remoteStyle: 'classic',
     });
     vi.mocked(openUrl).mockReset();
   });
@@ -76,6 +77,7 @@ describe('Sidebar', () => {
       showAllDevices: false,
       favoriteApps: {},
       preferLastUsed: true,
+      remoteStyle: 'classic',
     });
 
     renderWithTheme(<Sidebar isOpen onToggle={() => {}} scanForDevices={vi.fn()} isScanning={false} />);
@@ -83,5 +85,19 @@ describe('Sidebar', () => {
     expect(screen.getAllByText('Connected TV').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Selected Offline').length).toBeGreaterThan(0);
     expect(screen.queryByText('Hidden Offline')).not.toBeInTheDocument();
+  });
+
+  it('updates remote style from settings', async () => {
+    const scanForDevices = vi.fn();
+    renderWithTheme(<Sidebar isOpen onToggle={() => {}} scanForDevices={scanForDevices} isScanning={false} />);
+
+    const [settingsBtn] = screen.getAllByLabelText(/settings/i);
+    await userEvent.click(settingsBtn);
+
+    const styleSelect = await screen.findByRole('combobox', { name: /remote style/i });
+    await userEvent.click(styleSelect);
+    await userEvent.click(await screen.findByRole('option', { name: /glass/i }));
+
+    expect(useAppStore.getState().remoteStyle).toBe('glass');
   });
 });

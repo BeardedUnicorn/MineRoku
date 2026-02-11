@@ -3,6 +3,17 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 
 export type ConnectionStatus = 'connected' | 'connecting' | 'disconnected';
 
+export const remoteStylePresets = ['classic', 'studio', 'glass', 'highContrast'] as const;
+export type RemoteStylePreset = (typeof remoteStylePresets)[number];
+export const DEFAULT_REMOTE_STYLE: RemoteStylePreset = 'classic';
+
+export const coerceRemoteStylePreset = (value: unknown): RemoteStylePreset => {
+    if (typeof value === 'string' && (remoteStylePresets as readonly string[]).includes(value)) {
+        return value as RemoteStylePreset;
+    }
+    return DEFAULT_REMOTE_STYLE;
+};
+
 export interface RokuDevice {
     name: string;
     ip: string;
@@ -18,6 +29,7 @@ export interface AppState {
     favoriteApps: { [hardwareId: string]: string[] };
     preferLastUsed: boolean;
     showAllDevices: boolean;
+    remoteStyle: RemoteStylePreset;
     setDevices: (devices: RokuDevice[]) => void;
     setSelectedDevice: (device: RokuDevice | null) => void;
     updateDeviceStatus: (hardwareId: string, status: ConnectionStatus) => void;
@@ -27,6 +39,7 @@ export interface AppState {
     toggleFavoriteApp: (hardwareId: string, appId: string) => void;
     setPreferLastUsed: (v: boolean) => void;
     setShowAllDevices: (v: boolean) => void;
+    setRemoteStyle: (v: RemoteStylePreset) => void;
     resetState: () => void;
 }
 
@@ -40,6 +53,7 @@ const migrateStorage = () => {
         const state = data.state;
         
         if (!state) return;
+        state.remoteStyle = coerceRemoteStylePreset(state.remoteStyle);
         
         // Check if migration is needed (devices exist but don't have hardware_id)
         if (state.devices && state.devices.length > 0 && !state.devices[0].hardware_id) {
@@ -94,6 +108,7 @@ export const useAppStore = create<AppState>()(
                 favoriteApps: {},
                 preferLastUsed: true,
                 showAllDevices: true,
+                remoteStyle: DEFAULT_REMOTE_STYLE,
             };
 
             return {
@@ -234,6 +249,7 @@ export const useAppStore = create<AppState>()(
             
                 setPreferLastUsed: (v) => set({ preferLastUsed: v }),
                 setShowAllDevices: (v) => set({ showAllDevices: v }),
+                setRemoteStyle: (v) => set({ remoteStyle: coerceRemoteStylePreset(v) }),
                 resetState: () => set({ ...initialState }),
             };
         },
@@ -246,7 +262,16 @@ export const useAppStore = create<AppState>()(
                 selectedDevice: state.selectedDevice,
                 preferLastUsed: state.preferLastUsed,
                 showAllDevices: state.showAllDevices,
+                remoteStyle: state.remoteStyle,
             }),
+            merge: (persistedState, currentState) => {
+                const persisted = (persistedState as Partial<AppState> | undefined) ?? {};
+                return {
+                    ...currentState,
+                    ...persisted,
+                    remoteStyle: coerceRemoteStylePreset(persisted.remoteStyle),
+                };
+            },
         }
     )
 );

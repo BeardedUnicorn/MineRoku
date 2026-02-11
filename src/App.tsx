@@ -313,7 +313,7 @@ const App: React.FC = () => {
           style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}
         >
           {isMobile ? (
-            <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 1 }}>
+            <Box sx={{ flexGrow: 1, overflowY: 'auto', p: { xs: 1.25, sm: 1.5 } }}>
               {mobileView === 'remote' && <RemoteControl device={selectedDevice} />}
               {mobileView === 'apps' && (
                 <Suspense fallback={appLauncherFallback}>
@@ -481,15 +481,27 @@ const App: React.FC = () => {
             alignItems: 'center',
             flexDirection: 'row',
             flexShrink: 0,
+            backgroundColor: { xs: 'rgba(18,18,18,0.88)', md: 'transparent' },
+            backdropFilter: { xs: 'blur(10px)', md: 'none' },
           }}
         >
-          <Toolbar>
-            <IconButton edge="start" color="inherit" aria-label="menu" onClick={handleToggleSidebar} sx={{ mr: 2 }}>
+          <Toolbar sx={{ minHeight: { xs: 58, sm: 62, md: 64 }, px: { xs: 1, sm: 2 }, width: '100%' }}>
+            <IconButton
+              edge="start"
+              color="inherit"
+              aria-label="menu"
+              onClick={handleToggleSidebar}
+              sx={{
+                mr: { xs: 1, sm: 2 },
+                width: { xs: 44, sm: 42 },
+                height: { xs: 44, sm: 42 },
+              }}
+            >
               <MenuIcon />
             </IconButton>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexGrow: 1, minWidth: 0 }}>
               <Typography
-                variant="h6"
+                variant={isMobile ? 'subtitle1' : 'h6'}
                 component="h1"
                 noWrap
                 sx={{ color: 'primary.main', fontWeight: 'bold', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}
