@@ -1,11 +1,14 @@
 # Repository Guidelines
 
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the runtime topology, IPC surface, SQLite schema, and Android JNI bridge.
+
 ## Project Structure & Module Organization
-- Frontend (`src/`): React + TypeScript app. Components in `src/components/` and styles in `src/*.css`.
-- Backend (`src-tauri/`): Tauri 2 Rust app (`src-tauri/src/{main.rs,lib.rs,commands.rs}`), config in `src-tauri/tauri.conf.json`.
-- Rust crates (`crates/`): Reusable libraries (`crates/roku`, `crates/ssdp-client`).
+- Frontend (`src/`): React + TypeScript app. Components in `src/components/`, hooks in `src/hooks/`, Tauri command wrappers in `src/services/rokuClient.ts`, Zustand store in `src/store.ts`, styles in `src/*.css`.
+- Backend (`src-tauri/`): Tauri 2 Rust app (`src-tauri/src/{main.rs,lib.rs,commands.rs,background.rs,background_discovery.rs}`), config in `src-tauri/tauri.conf.json`.
+- Rust crates (`crates/`): `crates/roku` is the vendored ECP client. `crates/ssdp-client` is an empty placeholder — real SSDP comes from the upstream `ssdp-client` crate pulled in transitively.
+- Android (`src-tauri/gen/android/`): Kotlin sources for MediaSession and permissions under `app/src/main/java/com/rokucontroller/remote/`.
 - Assets: `public/` (static), `src/assets/` (bundled), icons under `src-tauri/icons/`.
-- Tests: colocated as `*.test.tsx` under `src/` with setup in `src/setupTests.ts`.
+- Tests: colocated as `*.test.tsx` under `src/` with setup in `src/setupTests.ts` and shared helpers in `src/testUtils.tsx`.
 
 ## Build, Test, and Development Commands
 - `npm run tauri dev` — Run desktop app with hot reload (frontend + Rust backend).
