@@ -17,7 +17,14 @@ describe('Sidebar', () => {
   };
 
   beforeEach(() => {
-    useAppStore.setState({ devices: [device], selectedDevice: null, favoriteApps: {} });
+    useAppStore.setState({
+      devices: [device],
+      selectedDevice: null,
+      favoriteApps: {},
+      preferLastUsed: true,
+      showAllDevices: true,
+      remoteStyle: 'classic',
+    });
     vi.mocked(openUrl).mockReset();
   });
 
@@ -47,5 +54,50 @@ describe('Sidebar', () => {
     const [aboutBtn] = screen.getAllByLabelText(/about/i);
     await userEvent.click(aboutBtn);
     expect(openUrl).toHaveBeenCalledWith('https://github.com/mherold1/roku-controller');
+  });
+
+  it('hides non-selected offline devices when show all discovered devices is disabled', () => {
+    const connected: RokuDevice = { ...device, hardware_id: 'roku:online', name: 'Connected TV', status: 'connected' };
+    const selectedOffline: RokuDevice = {
+      ...device,
+      hardware_id: 'roku:selected-offline',
+      name: 'Selected Offline',
+      status: 'disconnected',
+    };
+    const hiddenOffline: RokuDevice = {
+      ...device,
+      hardware_id: 'roku:hidden-offline',
+      name: 'Hidden Offline',
+      status: 'disconnected',
+    };
+
+    useAppStore.setState({
+      devices: [connected, selectedOffline, hiddenOffline],
+      selectedDevice: selectedOffline,
+      showAllDevices: false,
+      favoriteApps: {},
+      preferLastUsed: true,
+      remoteStyle: 'classic',
+    });
+
+    renderWithTheme(<Sidebar isOpen onToggle={() => {}} scanForDevices={vi.fn()} isScanning={false} />);
+
+    expect(screen.getAllByText('Connected TV').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Selected Offline').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Hidden Offline')).not.toBeInTheDocument();
+  });
+
+  it('updates remote style from settings', async () => {
+    const scanForDevices = vi.fn();
+    renderWithTheme(<Sidebar isOpen onToggle={() => {}} scanForDevices={scanForDevices} isScanning={false} />);
+
+    const [settingsBtn] = screen.getAllByLabelText(/settings/i);
+    await userEvent.click(settingsBtn);
+
+    const styleSelect = await screen.findByRole('combobox', { name: /remote style/i });
+    await userEvent.click(styleSelect);
+    await userEvent.click(await screen.findByRole('option', { name: /glass/i }));
+
+    expect(useAppStore.getState().remoteStyle).toBe('glass');
   });
 });

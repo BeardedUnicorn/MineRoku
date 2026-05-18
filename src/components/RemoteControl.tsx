@@ -1,6 +1,8 @@
 import React, { lazy, Suspense, useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { iconCache, ICON_CACHE_TTL_MS, ICON_CACHE_LIMIT } from '../iconCache';
 import {
+  Button,
+  ButtonBase,
   Box,
   Paper,
   Typography,
@@ -8,6 +10,7 @@ import {
   Snackbar,
   Alert,
   useTheme,
+  useMediaQuery,
   Tooltip,
   Stack,
   Divider,
@@ -27,12 +30,20 @@ import {
   playbackButtonSpecs,
   powerButtonSpecs,
 } from './RemoteButtonSpecs';
-import { RokuDevice } from '../store';
+import { RokuDevice, useAppStore } from '../store';
 import { usePlatform } from '../hooks/usePlatform';
 import {
+  getDpadMetrics,
+  getDpadSize,
+  getRemoteStyleTokens,
+  type RemoteStyleTokens,
+} from './remoteStyleTokens';
+import {
+  ensureAndroidNotificationPermission,
   getActiveApp,
   getAppIcon,
   getMediaPlayer,
+  openAndroidAppSettings,
   sendRokuCommand,
   updateMediaNotification,
   type ActiveAppInfo,
@@ -62,6 +73,7 @@ interface RemoteButtonProps {
   center?: boolean;
   shortcut?: string;
   currentPlatform?: string | null;
+  styleTokens: RemoteStyleTokens;
 }
 
 const RemoteButton: React.FC<RemoteButtonProps> = ({
@@ -76,21 +88,12 @@ const RemoteButton: React.FC<RemoteButtonProps> = ({
   variant = 'flat',
   shortcut,
   currentPlatform,
+  styleTokens,
 }) => {
   const theme = useTheme();
   const prefersReducedMotion = useReducedMotion();
-
-  const contrast =
-    color === 'primary'
-      ? theme.palette.primary.contrastText
-      : theme.palette.text.primary;
-
-  const bg =
-    variant === 'filled'
-        ? `linear-gradient(145deg, ${theme.palette.primary.light}, ${theme.palette.primary.main})`
-        : ring
-        ? 'transparent'
-        : theme.palette.background.paper;
+  const isFilled = variant === 'filled';
+  const isError = color === 'error';
 
   const ringStyle =
     ring && !center
@@ -98,12 +101,39 @@ const RemoteButton: React.FC<RemoteButtonProps> = ({
           border: `2px solid ${
             color === 'primary'
               ? theme.palette.primary.main
-              : theme.palette.divider
+              : color === 'error'
+              ? theme.palette.error.main
+              : styleTokens.ringBorderColor
           }`,
         }
       : {};
 
   const finalSize = typeof size === 'number' ? { xs: size, sm: size } : size;
+  const iconScale = center ? 0.42 : 0.4;
+  const iconFontSize = {
+    xs: Math.max(20, Math.round(finalSize.xs * iconScale)),
+    sm: Math.max(20, Math.round(finalSize.sm * iconScale)),
+  };
+
+  const contrast = isFilled
+    ? styleTokens.centerButtonColor
+    : isError
+    ? theme.palette.error.contrastText
+    : styleTokens.flatButtonColor;
+
+  const background = isFilled
+    ? styleTokens.centerButtonBackground
+    : ring
+    ? 'transparent'
+    : isError
+    ? theme.palette.error.dark
+    : styleTokens.flatButtonBackground;
+
+  const hoverBackground = isFilled
+    ? styleTokens.centerButtonHoverBackground
+    : isError
+    ? theme.palette.error.main
+    : styleTokens.flatButtonHoverBackground;
 
   return (
     <motion.div
@@ -125,32 +155,29 @@ const RemoteButton: React.FC<RemoteButtonProps> = ({
       >
         <IconButton
           aria-label={label}
-            onClick={() => onSend(cmd)}
-            sx={{
-              width: finalSize,
-              height: finalSize,
-              borderRadius: '50%',
-              background: bg,
-              color: contrast,
-              boxShadow:
-                variant === 'filled'
-                  ? `0 6px 12px rgba(0,0,0,0.5), inset 0 1px 1px rgba(255,255,255,0.1)`
-                  : 'none',
-              transition: 'background .25s, box-shadow .25s',
-              '&:hover': {
-                background:
-                  variant === 'filled'
-                    ? `linear-gradient(145deg, ${theme.palette.primary.main}, ${theme.palette.primary.dark})`
-                    : theme.palette.action.hover,
-              },
-              '&:active': {
-                boxShadow:
-                  variant === 'filled'
-                    ? `0 2px 5px rgba(0,0,0,0.7) inset, 0 1px 2px rgba(0,0,0,0.3)`
-                    : 'none',
-              },
-              ...ringStyle,
-            }}
+          onClick={() => onSend(cmd)}
+          sx={{
+            width: finalSize,
+            height: finalSize,
+            borderRadius: '50%',
+            background,
+            color: contrast,
+            boxShadow: isFilled ? styleTokens.centerButtonShadow : 'none',
+            transition: 'background .25s, box-shadow .25s',
+            touchAction: 'manipulation',
+            '& .MuiSvgIcon-root': {
+              fontSize: iconFontSize,
+            },
+            '&:hover': {
+              background: hoverBackground,
+            },
+            '&:active': {
+              boxShadow: isFilled
+                ? `0 2px 5px rgba(0,0,0,0.7) inset, 0 1px 2px rgba(0,0,0,0.3)`
+                : 'none',
+            },
+            ...ringStyle,
+          }}
         >
           {icon}
         </IconButton>
@@ -158,11 +185,6 @@ const RemoteButton: React.FC<RemoteButtonProps> = ({
     </motion.div>
   );
 };
-
-const ARROW_SIZE = 64;
-const CENTER_SIZE = 72;
-const GAP = 12;
-const DPAD_SIZE = CENTER_SIZE + ARROW_SIZE * 2 + GAP * 4;
 
 const useActiveAppIcon = (device: RokuDevice, app: ActiveApp | null) => {
   const [icon, setIcon] = useState<string | null>(null);
@@ -233,6 +255,7 @@ const ActiveAppIcon: React.FC<{ app: ActiveApp; icon: string | null }> = ({ app,
 const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
   const theme = useTheme();
   const [feedback, setFeedback] = useState<FeedbackState>(null);
+  const [showSettingsAction, setShowSettingsAction] = useState(false);
   const [activeApp, setActiveApp] = useState<ActiveApp | null>(null);
   const [isAppLoading, setIsAppLoading] = useState<boolean>(true);
   const [mediaInfo, setMediaInfo] = useState<MediaPlayerInfo | null>(null);
@@ -241,8 +264,21 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
   const busyRef = useRef<Set<string>>(new Set());
   const abortControllerRef = useRef<AbortController | null>(null);
   const deviceStatusRef = useRef<RokuDevice['status']>(device.status);
+  const remoteStyle = useAppStore((s) => s.remoteStyle);
+  const isPhone = useMediaQuery(theme.breakpoints.down('sm'));
   const currentPlatform = usePlatform();
+  const notificationPermissionReadyRef = useRef(currentPlatform !== 'android');
   const activeAppIcon = useActiveAppIcon(device, activeApp);
+  const dpadMetrics = useMemo(() => getDpadMetrics(isPhone), [isPhone]);
+  const dpadSize = useMemo(() => getDpadSize(dpadMetrics), [dpadMetrics]);
+  const styleTokens = useMemo(
+    () => getRemoteStyleTokens(remoteStyle, theme),
+    [remoteStyle, theme]
+  );
+
+  useEffect(() => {
+    notificationPermissionReadyRef.current = currentPlatform !== 'android';
+  }, [currentPlatform]);
 
   useEffect(() => {
     deviceStatusRef.current = device.status;
@@ -507,10 +543,21 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
 
     const updateNotification = async () => {
       try {
-        const iconUrl =
-          activeApp.id !== 'roku'
-            ? `http://${device.ip}:${device.port}/query/icon/${activeApp.id}`
-            : undefined;
+        if (!notificationPermissionReadyRef.current) {
+          const hasPermission = await ensureAndroidNotificationPermission();
+          if (!hasPermission) {
+            setShowSettingsAction(true);
+            setFeedback({
+              message:
+                'Notification permission is required for lock-screen controls. Grant permission and retry.',
+              severity: 'error',
+            });
+            return;
+          }
+          notificationPermissionReadyRef.current = true;
+          setShowSettingsAction(false);
+        }
+
         const mediaState = mediaInfo?.state?.toLowerCase();
         const playing = mediaState === 'play' || mediaState === 'playing';
 
@@ -519,8 +566,8 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
           deviceIp: device.ip,
           devicePort: device.port,
           appName: activeApp.name,
+          appId: activeApp.id === 'roku' ? undefined : activeApp.id,
           isPlaying: playing,
-          appIconUrl: iconUrl,
         });
       } catch (error) {
         console.log('Failed to update media notification:', error);
@@ -549,20 +596,21 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
   const mediaState = mediaInfo?.state?.toLowerCase() ?? '';
   const isPlaying = mediaState === 'play' || mediaState === 'playing';
   const showProgress = mediaInfo && !mediaInfo.is_live && duration > 0 && (mediaState === 'play' || mediaState === 'pause');
-  const baseBackground = `linear-gradient(145deg, ${theme.palette.background.paper}, ${theme.palette.background.default})`;
   const remoteBackground = activeAppIcon
-    ? `linear-gradient(145deg, rgba(12,12,12,0.7), rgba(12,12,12,0.92)), url(${activeAppIcon})`
-    : baseBackground;
+    ? `${styleTokens.activeAppOverlay}, url(${activeAppIcon})`
+    : styleTokens.cardBackground;
 
   return (
     <Paper
       elevation={8}
+      data-testid="remote-control-shell"
+      data-remote-style={remoteStyle}
       sx={{
         mx: 'auto',
         width: '100%',
-        maxWidth: 320,
+        maxWidth: { xs: 380, sm: 340, md: 320 },
         borderRadius: '42px',
-        px: { xs: 2, sm: 3 },
+        px: { xs: 2.5, sm: 3 },
         py: { xs: 3, sm: 4 },
         position: 'relative',
         display: 'flex',
@@ -570,18 +618,19 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
         alignItems: 'center',
         gap: { xs: 1.5, sm: 2 },
         backgroundImage: remoteBackground,
-        backgroundSize: activeAppIcon ? 'cover' : 'auto',
-        backgroundPosition: 'center',
-        backgroundRepeat: 'no-repeat',
-        boxShadow: `
-          inset 0 1px 2px rgba(255,255,255,0.06),
-          0 6px 18px rgba(0,0,0,0.6)
-        `,
+        backgroundSize: activeAppIcon ? 'cover, cover' : 'auto',
+        backgroundPosition: activeAppIcon ? 'center, center' : 'center',
+        backgroundRepeat: activeAppIcon ? 'no-repeat, no-repeat' : 'no-repeat',
+        backgroundClip: 'padding-box',
+        border: styleTokens.cardBorder,
+        backdropFilter: styleTokens.cardBackdropFilter,
+        boxShadow: styleTokens.cardShadow,
+        overflow: 'hidden',
       }}
     >
       <Typography
         variant="subtitle1"
-        sx={{ fontWeight: 600, letterSpacing: 0.5 }}
+        sx={{ fontWeight: 700, letterSpacing: 0.5, color: styleTokens.titleColor }}
       >
         Roku Remote
       </Typography>
@@ -602,23 +651,26 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
       )}
 
       <Box sx={{ width: '100%' }}>
-        <Box sx={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 1.5,
-          minHeight: 40,
-          px: 2,
-          py: 1,
-          borderRadius: 2,
-          backgroundColor: 'action.hover',
-          cursor: 'pointer',
-          transition: 'background-color 0.2s',
-          '&:hover': {
-            backgroundColor: 'action.selected',
-          }
-        }}
+        <ButtonBase
+          aria-label="Open Media Player Status"
           onClick={() => setMediaModalOpen(true)}
+          sx={{
+            width: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 1.5,
+            minHeight: 40,
+            px: 2,
+            py: 1,
+            borderRadius: 2,
+            backgroundColor: styleTokens.appPillBackground,
+            transition: 'background-color 0.2s',
+            touchAction: 'manipulation',
+            '&:hover': {
+              backgroundColor: styleTokens.appPillHoverBackground,
+            },
+          }}
         >
           {isAppLoading ? (
             <CircularProgress size={20} />
@@ -634,7 +686,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
               Home Screen
             </Typography>
           )}
-        </Box>
+        </ButtonBase>
 
         {showProgress && (
           <Box sx={{mt: 1.5 }}>
@@ -680,6 +732,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
             shortcut={b.shortcut}
             size={{ xs: 48, sm: 56 }}
             currentPlatform={currentPlatform}
+            styleTokens={styleTokens}
           />
         ))}
       </Stack>
@@ -687,8 +740,8 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
       <Box
         sx={{
           position: 'relative',
-          width: DPAD_SIZE,
-          height: DPAD_SIZE,
+          width: dpadSize,
+          height: dpadSize,
           mt: 1
         }}
       >
@@ -697,12 +750,11 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
             position: 'absolute',
             inset: 0,
             borderRadius: '50%',
-            background: `radial-gradient(circle at 30% 30%, ${theme.palette.grey[900]} 0%, ${theme.palette.grey[800]} 60%, ${theme.palette.grey[900]} 100%)`,
+            background: styleTokens.dpadBackground,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            boxShadow:
-              '0 4px 10px rgba(0,0,0,0.6), inset 0 2px 4px rgba(255,255,255,0.05)',
+            boxShadow: styleTokens.dpadShadow,
           }}
         >
           <Box
@@ -712,17 +764,53 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
               height: '100%',
             }}
           >
-            <Box sx={{ position: 'absolute', top: GAP, left: '50%', transform: 'translateX(-50%)' }}>
-              <RemoteButton cmd="up" label="Up" icon={<KeyboardArrowUpIcon />} onSend={sendCommand} ring shortcut="↑" size={ARROW_SIZE} />
+            <Box sx={{ position: 'absolute', top: dpadMetrics.gap, left: '50%', transform: 'translateX(-50%)' }}>
+              <RemoteButton
+                cmd="up"
+                label="Up"
+                icon={<KeyboardArrowUpIcon />}
+                onSend={sendCommand}
+                ring
+                shortcut="↑"
+                size={dpadMetrics.arrowSize}
+                styleTokens={styleTokens}
+              />
             </Box>
-            <Box sx={{ position: 'absolute', bottom: GAP, left: '50%', transform: 'translateX(-50%)' }}>
-              <RemoteButton cmd="down" label="Down" icon={<KeyboardArrowDownIcon />} onSend={sendCommand} ring shortcut="↓" size={ARROW_SIZE} />
+            <Box sx={{ position: 'absolute', bottom: dpadMetrics.gap, left: '50%', transform: 'translateX(-50%)' }}>
+              <RemoteButton
+                cmd="down"
+                label="Down"
+                icon={<KeyboardArrowDownIcon />}
+                onSend={sendCommand}
+                ring
+                shortcut="↓"
+                size={dpadMetrics.arrowSize}
+                styleTokens={styleTokens}
+              />
             </Box>
-            <Box sx={{ position: 'absolute', left: GAP, top: '50%', transform: 'translateY(-50%)' }}>
-              <RemoteButton cmd="left" label="Left" icon={<KeyboardArrowLeftIcon />} onSend={sendCommand} ring shortcut="←" size={ARROW_SIZE} />
+            <Box sx={{ position: 'absolute', left: dpadMetrics.gap, top: '50%', transform: 'translateY(-50%)' }}>
+              <RemoteButton
+                cmd="left"
+                label="Left"
+                icon={<KeyboardArrowLeftIcon />}
+                onSend={sendCommand}
+                ring
+                shortcut="←"
+                size={dpadMetrics.arrowSize}
+                styleTokens={styleTokens}
+              />
             </Box>
-            <Box sx={{ position: 'absolute', right: GAP, top: '50%', transform: 'translateY(-50%)' }}>
-              <RemoteButton cmd="right" label="Right" icon={<KeyboardArrowRightIcon />} onSend={sendCommand} ring shortcut="→" size={ARROW_SIZE} />
+            <Box sx={{ position: 'absolute', right: dpadMetrics.gap, top: '50%', transform: 'translateY(-50%)' }}>
+              <RemoteButton
+                cmd="right"
+                label="Right"
+                icon={<KeyboardArrowRightIcon />}
+                onSend={sendCommand}
+                ring
+                shortcut="→"
+                size={dpadMetrics.arrowSize}
+                styleTokens={styleTokens}
+              />
             </Box>
             <Box sx={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }}>
               <RemoteButton
@@ -733,8 +821,9 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
                 variant="filled"
                 color="primary"
                 shortcut="Enter"
-                size={CENTER_SIZE}
+                size={dpadMetrics.centerSize}
                 center
+                styleTokens={styleTokens}
               />
             </Box>
           </Box>
@@ -743,23 +832,52 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
 
       <Stack direction="row" spacing={{ xs: 1, sm: 2 }} justifyContent="center" alignItems="center" sx={{ width: '100%', mt: 1 }} >
         {playbackButtons.map((b) => (
-          <RemoteButton key={b.key} cmd={b.key} label={b.label} icon={b.icon} onSend={sendCommand} shortcut={b.shortcut} size={{ xs: 48, sm: 56 }} currentPlatform={currentPlatform} />
+          <RemoteButton
+            key={b.key}
+            cmd={b.key}
+            label={b.label}
+            icon={b.icon}
+            onSend={sendCommand}
+            shortcut={b.shortcut}
+            size={{ xs: 48, sm: 56 }}
+            currentPlatform={currentPlatform}
+            styleTokens={styleTokens}
+          />
         ))}
       </Stack>
 
-      <Divider flexItem variant="middle" sx={{ opacity: 0.3, width: '80%', my: 1 }} />
+      <Divider flexItem variant="middle" sx={{ opacity: styleTokens.dividerOpacity, width: '80%', my: 1 }} />
 
       <Stack direction="row" spacing={{ xs: 1, sm: 2 }} justifyContent="center" alignItems="center" sx={{ width: '100%' }} >
         {volumeButtons.map((b) => (
-          <RemoteButton key={b.key} cmd={b.key} label={b.label} icon={b.icon} onSend={sendCommand} shortcut={b.shortcut} size={{ xs: 44, sm: 52 }} currentPlatform={currentPlatform} />
+          <RemoteButton
+            key={b.key}
+            cmd={b.key}
+            label={b.label}
+            icon={b.icon}
+            onSend={sendCommand}
+            shortcut={b.shortcut}
+            size={{ xs: 44, sm: 52 }}
+            currentPlatform={currentPlatform}
+            styleTokens={styleTokens}
+          />
         ))}
         {powerButtons.map((b) => (
-            <RemoteButton key={b.key} cmd={b.key} label={b.label} icon={b.icon} onSend={sendCommand} size={{ xs: 44, sm: 52 }} color="error" />
+            <RemoteButton
+              key={b.key}
+              cmd={b.key}
+              label={b.label}
+              icon={b.icon}
+              onSend={sendCommand}
+              size={{ xs: 44, sm: 52 }}
+              color="error"
+              styleTokens={styleTokens}
+            />
         ))}
       </Stack>
 
       {currentPlatform !== 'android' && currentPlatform !== 'ios' && (
-        <Typography variant="caption" sx={{ opacity: 0.6, textAlign: 'center', mt: 1, maxWidth: 260 }} >
+        <Typography variant="caption" sx={{ opacity: styleTokens.helperTextOpacity, textAlign: 'center', mt: 1, maxWidth: 260 }} >
           Use arrow keys, Enter, Space, +/-, and Backspace/Esc for keyboard control.
         </Typography>
       )}
@@ -775,7 +893,26 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
       )}
 
       <Snackbar open={!!feedback} autoHideDuration={3000} onClose={() => setFeedback(null)} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }} >
-        <Alert onClose={() => setFeedback(null)} severity={feedback?.severity} sx={{ width: '100%' }} >
+        <Alert
+          onClose={() => setFeedback(null)}
+          severity={feedback?.severity}
+          sx={{ width: '100%' }}
+          action={
+            showSettingsAction ? (
+              <Button
+                color="inherit"
+                size="small"
+                onClick={() => {
+                  void openAndroidAppSettings().catch((error) => {
+                    console.error('Failed to open Android app settings:', error);
+                  });
+                }}
+              >
+                Settings
+              </Button>
+            ) : undefined
+          }
+        >
           {feedback?.message}
         </Alert>
       </Snackbar>

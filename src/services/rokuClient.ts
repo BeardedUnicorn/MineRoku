@@ -50,8 +50,8 @@ interface UpdateMediaNotificationArgs {
   deviceIp: string;
   devicePort: number;
   appName: string;
+  appId?: string;
   isPlaying: boolean;
-  appIconUrl?: string;
 }
 
 const ICON_REQUEST_CONCURRENCY = 6;
@@ -211,7 +211,19 @@ export async function updateMediaNotification(
     deviceIp: args.deviceIp,
     devicePort: args.devicePort,
     appName: args.appName,
+    appId: args.appId,
     isPlaying: args.isPlaying,
-    appIconUrl: args.appIconUrl,
   });
+}
+
+export async function ensureAndroidDiscoveryPermissions(): Promise<boolean> {
+  return invoke<boolean>('ensure_android_discovery_permissions');
+}
+
+export async function ensureAndroidNotificationPermission(): Promise<boolean> {
+  return invoke<boolean>('ensure_android_notification_permission');
+}
+
+export async function openAndroidAppSettings(): Promise<void> {
+  return invoke<void>('open_android_app_settings');
 }

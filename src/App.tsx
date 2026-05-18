@@ -28,9 +28,10 @@ import { usePlatform } from './hooks/usePlatform';
 import {
   checkDeviceConnectivity,
   discoverRokuDevices,
+  ensureAndroidDiscoveryPermissions,
   getCachedDevices,
+  openAndroidAppSettings,
   type RokuDeviceEvent,
-  updateMediaNotification,
 } from './services/rokuClient';
 
 const LazyAppLauncher = lazy(() => import('./components/AppLauncher'));
@@ -168,28 +169,6 @@ const App: React.FC = () => {
     };
   }, [selectedDevice?.hardware_id, selectedDevice?.ip, selectedDevice?.port, updateDeviceStatus]);
 
-  useEffect(() => {
-    if (currentPlatform !== 'android' || !selectedDevice) {
-      return;
-    }
-
-    void updateMediaNotification({
-      deviceName: selectedDevice.name,
-      deviceIp: selectedDevice.ip,
-      devicePort: selectedDevice.port,
-      appName: 'Roku Remote',
-      isPlaying: false,
-    }).catch((error) => {
-      console.log('Media notification update not available:', error);
-    });
-  }, [
-    currentPlatform,
-    selectedDevice?.hardware_id,
-    selectedDevice?.name,
-    selectedDevice?.ip,
-    selectedDevice?.port,
-  ]);
-
   const handleToggleSidebar = useCallback(() => {
     setIsSidebarOpen((v) => !v);
   }, []);
@@ -200,9 +179,20 @@ const App: React.FC = () => {
     }
 
     const scanPromise = (async () => {
+      if (currentPlatform === 'android') {
+        const hasPermissions = await ensureAndroidDiscoveryPermissions();
+        if (!hasPermissions) {
+          setIsSearching(false);
+          setScanStatus(
+            'Discovery permissions are required. Allow location and nearby devices, then tap refresh again.'
+          );
+          return;
+        }
+      }
+
       setIsScanning(true);
       setIsSearching(true);
-      setScanStatus('Scanning network...');
+      setScanStatus('Scanning network…');
 
       try {
         const foundDevices = await discoverRokuDevices();
@@ -246,7 +236,7 @@ const App: React.FC = () => {
         scanPromiseRef.current = null;
       }
     });
-  }, [addDiscoveredDevices, markDeviceDisconnected, setSelectedDevice]);
+  }, [addDiscoveredDevices, currentPlatform, markDeviceDisconnected, setSelectedDevice]);
 
   useEffect(() => {
     let active = true;
@@ -274,12 +264,17 @@ const App: React.FC = () => {
         console.error('Failed to initialize discovery listeners:', error);
       }
     });
-    void scanForDevices();
+    if (currentPlatform === 'android') {
+      setIsSearching(false);
+      setScanStatus((status) => status || 'Tap refresh to scan for Roku devices.');
+    } else {
+      void scanForDevices();
+    }
 
     return () => {
       active = false;
     };
-  }, [scanForDevices, upsertDevice, setSelectedDevice]);
+  }, [currentPlatform, scanForDevices, upsertDevice, setSelectedDevice]);
 
   const contentVariants = useMemo(
     () =>
@@ -318,7 +313,7 @@ const App: React.FC = () => {
           style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}
         >
           {isMobile ? (
-            <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 1 }}>
+            <Box sx={{ flexGrow: 1, overflowY: 'auto', p: { xs: 1.25, sm: 1.5 } }}>
               {mobileView === 'remote' && <RemoteControl device={selectedDevice} />}
               {mobileView === 'apps' && (
                 <Suspense fallback={appLauncherFallback}>
@@ -364,10 +359,12 @@ const App: React.FC = () => {
             height: '100%',
             gap: 2,
           }}
+          role="status"
+          aria-live="polite"
         >
           <CircularProgress />
           <Typography variant="h6" color="text.secondary">
-            Searching for Roku devices...
+            Searching for Roku devices…
           </Typography>
           {scanStatus && (
             <Typography variant="body2" color="text.secondary">
@@ -379,6 +376,8 @@ const App: React.FC = () => {
     }
 
     if (!hasAnyDevices) {
+      const discoveryPermissionBlocked =
+        currentPlatform === 'android' && scanStatus.toLowerCase().includes('permission');
       return (
         <Paper
           sx={{
@@ -399,7 +398,7 @@ const App: React.FC = () => {
             refresh to scan again.
           </Typography>
           {scanStatus && (
-            <Typography variant="body2" color="error" sx={{ mt: 1 }}>
+            <Typography variant="body2" color="error" sx={{ mt: 1 }} aria-live="polite">
               {scanStatus}
             </Typography>
           )}
@@ -410,8 +409,21 @@ const App: React.FC = () => {
             onClick={scanForDevices}
             disabled={isScanning}
           >
-            {isScanning ? 'Scanning...' : 'Refresh'}
+            {isScanning ? 'Scanning…' : 'Refresh'}
           </Button>
+          {discoveryPermissionBlocked && (
+            <Button
+              variant="outlined"
+              sx={{ mt: 1.5 }}
+              onClick={() => {
+                void openAndroidAppSettings().catch((error) => {
+                  console.error('Failed to open Android app settings:', error);
+                });
+              }}
+            >
+              Open Settings
+            </Button>
+          )}
         </Paper>
       );
     }
@@ -445,6 +457,7 @@ const App: React.FC = () => {
     scanStatus,
     isScanning,
     scanForDevices,
+    currentPlatform,
   ]);
 
   return (
@@ -468,14 +481,31 @@ const App: React.FC = () => {
             alignItems: 'center',
             flexDirection: 'row',
             flexShrink: 0,
+            backgroundColor: { xs: 'rgba(18,18,18,0.88)', md: 'transparent' },
+            backdropFilter: { xs: 'blur(10px)', md: 'none' },
           }}
         >
-          <Toolbar>
-            <IconButton edge="start" color="inherit" aria-label="menu" onClick={handleToggleSidebar} sx={{ mr: 2 }}>
+          <Toolbar sx={{ minHeight: { xs: 58, sm: 62, md: 64 }, px: { xs: 1, sm: 2 }, width: '100%' }}>
+            <IconButton
+              edge="start"
+              color="inherit"
+              aria-label="menu"
+              onClick={handleToggleSidebar}
+              sx={{
+                mr: { xs: 1, sm: 2 },
+                width: { xs: 44, sm: 42 },
+                height: { xs: 44, sm: 42 },
+              }}
+            >
               <MenuIcon />
             </IconButton>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexGrow: 1 }}>
-              <Typography variant="h6" component="div" sx={{ color: 'primary.main', fontWeight: 'bold' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexGrow: 1, minWidth: 0 }}>
+              <Typography
+                variant={isMobile ? 'subtitle1' : 'h6'}
+                component="h1"
+                noWrap
+                sx={{ color: 'primary.main', fontWeight: 'bold', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}
+              >
                 {selectedDevice ? selectedDevice.name : 'Roku Remote'}
               </Typography>
               {selectedDevice && (
@@ -496,7 +526,12 @@ const App: React.FC = () => {
           </Toolbar>
         </AppBar>
 
-        <Box component="main" className={`main-content ${isMobile && selectedDevice ? 'main-content-mobile' : ''}`}>
+        <Box
+          component="main"
+          id="main-content"
+          tabIndex={-1}
+          className={`main-content ${isMobile && selectedDevice ? 'main-content-mobile' : ''}`}
+        >
           <Box
             sx={{
               display: 'flex',

@@ -1,12 +1,13 @@
 import React from 'react';
 import { openUrl } from '@tauri-apps/plugin-opener';
-import { useAppStore, RokuDevice } from '../store';
+import { remoteStylePresets, type RemoteStylePreset, useAppStore, RokuDevice } from '../store';
 import { iconCache } from '../iconCache';
 import { shallow } from 'zustand/shallow';
 import {
     Drawer, List, ListItemButton, ListItemText,
     Typography, Box, IconButton, Divider, CircularProgress, Tooltip, useTheme, useMediaQuery,
-    Dialog, DialogTitle, DialogContent, DialogActions, FormControlLabel, Switch, Stack, Button
+    Dialog, DialogTitle, DialogContent, DialogActions, FormControlLabel, Switch, Stack, Button,
+    FormControl, InputLabel, Select, MenuItem
 } from '@mui/material';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import SettingsIcon from '@mui/icons-material/Settings';
@@ -14,6 +15,7 @@ import InfoIcon from '@mui/icons-material/Info';
 import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
 import { usePlatform } from '../hooks/usePlatform';
 import { clearAllData, restartApp } from '../services/rokuClient';
+import { remoteStyleLabels } from './remoteStyleTokens';
 
 interface SidebarProps {
     isOpen: boolean;
@@ -32,6 +34,8 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, scanForDevices, isS
     const setPreferLastUsed = useAppStore((s) => s.setPreferLastUsed);
     const showAllDevices = useAppStore((s) => s.showAllDevices);
     const setShowAllDevices = useAppStore((s) => s.setShowAllDevices);
+    const remoteStyle = useAppStore((s) => s.remoteStyle);
+    const setRemoteStyle = useAppStore((s) => s.setRemoteStyle);
     const resetState = useAppStore((s) => s.resetState);
     const theme = useTheme();
     const isMobile = useMediaQuery(theme.breakpoints.down('md'));
@@ -39,6 +43,21 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, scanForDevices, isS
     const [confirmDeleteOpen, setConfirmDeleteOpen] = React.useState(false);
     const [isDeleting, setIsDeleting] = React.useState(false);
     const currentPlatform = usePlatform();
+    const visibleDevices = React.useMemo(() => {
+        if (showAllDevices) {
+            return devices;
+        }
+
+        const connectedDevices = devices.filter((device) => device.status === 'connected');
+        if (
+            selectedDevice &&
+            !connectedDevices.some((device) => device.hardware_id === selectedDevice.hardware_id)
+        ) {
+            return [selectedDevice, ...connectedDevices];
+        }
+
+        return connectedDevices;
+    }, [devices, selectedDevice, showAllDevices]);
 
     const handleDeviceSelect = (device: RokuDevice) => {
         setSelectedDevice(device);
@@ -125,7 +144,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, scanForDevices, isS
             <Divider />
             <Box sx={{ flexGrow: 1, overflowY: 'auto' }}>
                 <List>
-                    {devices.map((device: RokuDevice) => (
+                    {visibleDevices.map((device: RokuDevice) => (
                         <ListItemButton
                             key={device.hardware_id}
                             selected={selectedDevice?.hardware_id === device.hardware_id}
@@ -154,9 +173,13 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, scanForDevices, isS
                             </Tooltip>
                         </ListItemButton>
                     ))}
-                    {!devices.length && (
-                        <Typography variant="body2" color="text.secondary" sx={{ p: 2 }}>
-                            {isScanning ? 'Scanning for devices…' : 'No devices discovered yet.'}
+                    {!visibleDevices.length && (
+                        <Typography variant="body2" color="text.secondary" sx={{ p: 2 }} role="status" aria-live="polite">
+                            {isScanning
+                                ? 'Scanning for devices…'
+                                : showAllDevices
+                                    ? 'No devices discovered yet.'
+                                    : 'No connected devices. Enable "Show all discovered devices" in Settings to view offline devices.'}
                         </Typography>
                     )}
                 </List>
@@ -217,7 +240,26 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, scanForDevices, isS
                         label="Show all discovered devices"
                     />
                     <Typography variant="caption" color="text.secondary">
-                        When disabled, the app will auto-select the first device found for faster startup.
+                        When disabled, only connected devices are shown. Your selected device stays visible even if it goes offline.
+                    </Typography>
+                    <FormControl fullWidth size="small">
+                        <InputLabel id="remote-style-label">Remote style</InputLabel>
+                        <Select
+                            labelId="remote-style-label"
+                            id="remote-style"
+                            label="Remote style"
+                            value={remoteStyle}
+                            onChange={(e) => setRemoteStyle(e.target.value as RemoteStylePreset)}
+                        >
+                            {remoteStylePresets.map((style) => (
+                                <MenuItem key={style} value={style}>
+                                    {remoteStyleLabels[style]}
+                                </MenuItem>
+                            ))}
+                        </Select>
+                    </FormControl>
+                    <Typography variant="caption" color="text.secondary">
+                        Applies to the remote on mobile and desktop.
                     </Typography>
                     
                     <Divider sx={{ my: 2 }} />
@@ -282,7 +324,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, scanForDevices, isS
                     disabled={isDeleting}
                     startIcon={isDeleting ? <CircularProgress size={16} color="inherit" /> : <DeleteForeverIcon />}
                 >
-                    {isDeleting ? 'Deleting...' : 'Delete All & Restart'}
+                    {isDeleting ? 'Deleting…' : 'Delete All & Restart'}
                 </Button>
             </DialogActions>
         </Dialog>
