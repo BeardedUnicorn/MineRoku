@@ -3,9 +3,9 @@ set -euo pipefail
 
 OS="$(uname -s)"
 
-install_tauri_cli() {
-  if ! command -v tauri >/dev/null 2>&1; then
-    npm install -g @tauri-apps/cli
+install_pnpm() {
+  if ! command -v pnpm >/dev/null 2>&1; then
+    npm install -g pnpm@12
   fi
 }
 
@@ -23,7 +23,7 @@ if [[ "$OS" == "Darwin" ]]; then
   command -v rustup >/dev/null 2>&1 || (curl https://sh.rustup.rs -sSf | sh -s -- -y)
   export PATH="$HOME/.cargo/bin:$PATH"
 
-  install_tauri_cli
+  install_pnpm
 
   # JDK 17
   command -v javac >/dev/null 2>&1 || brew install openjdk@17
@@ -56,7 +56,7 @@ elif [[ "$OS" =~ MINGW|MSYS|CYGWIN ]]; then
 
   command -v node >/dev/null 2>&1 || choco install -y nodejs-lts
   command -v rustup >/dev/null 2>&1 || choco install -y rustup.install && rustup default stable
-  install_tauri_cli
+  install_pnpm
   command -v javac >/dev/null 2>&1 || choco install -y openjdk17
 
   export JAVA_HOME="/c/Program Files/OpenJDK/openjdk-17"
@@ -82,4 +82,4 @@ else
   exit 1
 fi
 
-echo "Environment configured. Run 'npm run tauri android build' to build the project."
+echo "Environment configured. Run 'pnpm install', then 'pnpm tauri android build' to build the project."

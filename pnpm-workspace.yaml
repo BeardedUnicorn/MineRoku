@@ -1,0 +1,4 @@
+# Install scripts stay off unless a package needs one to work.
+allowBuilds:
+  # Its prebuilt binary arrives as an optional dependency; the script only validates it.
+  esbuild: false
