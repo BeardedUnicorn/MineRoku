@@ -8,9 +8,9 @@ Fast, cross‑platform desktop app for discovering and controlling Roku devices.
 
 <p>
   <a href="https://tauri.app" target="_blank"><img alt="Tauri" src="https://img.shields.io/badge/Tauri-2.x-24C8DB?logo=tauri&logoColor=white"></a>
-  <a href="https://react.dev" target="_blank"><img alt="React" src="https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=white"></a>
+  <a href="https://react.dev" target="_blank"><img alt="React" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white"></a>
   <a href="https://www.rust-lang.org" target="_blank"><img alt="Rust" src="https://img.shields.io/badge/Rust-stable-000000?logo=rust&logoColor=white"></a>
-  <a href="https://www.typescriptlang.org" target="_blank"><img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white"></a>
+  <a href="https://www.typescriptlang.org" target="_blank"><img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-7-3178C6?logo=typescript&logoColor=white"></a>
 </p>
 
 ## Overview
@@ -71,9 +71,9 @@ Short GIF showing navigation and launching an app:
 ## Quick Start
 
 ### Prerequisites
-- [Node.js](https://nodejs.org/) (v16 or higher)
+- [Node.js](https://nodejs.org/) 26, ideally through [nvm](https://github.com/nvm-sh/nvm) (the repo has an `.nvmrc`)
+- [pnpm](https://pnpm.io/) 12
 - [Rust](https://rustup.rs/) (latest stable)
-- [Tauri CLI](https://tauri.app/v1/guides/getting-started/prerequisites)
 
 ### Installation Steps
 1. Clone the repository:
@@ -82,29 +82,30 @@ Short GIF showing navigation and launching an app:
    cd mine-roku
    ```
 
-2. Install frontend dependencies:
+2. Select Node 26 and install pnpm (Node 26 no longer includes corepack):
    ```bash
-   npm install
+   nvm install
+   npm install -g pnpm@12
    ```
 
-3. Install Tauri CLI (if not already installed):
+3. Install dependencies, which include the Tauri CLI:
    ```bash
-   npm install -g @tauri-apps/cli
+   pnpm install
    ```
 
 4. Run in development mode:
    ```bash
-   npm run tauri dev
+   pnpm tauri dev
    ```
 
 5. Build for production:
    ```bash
-   npm run tauri build
+   pnpm tauri build
    ```
 
 6. Frontend-only dev server (optional):
    ```bash
-   npm run dev
+   pnpm dev
    ```
 
 ## Usage Guide
@@ -162,7 +163,7 @@ mine-roku/
 ├── public/                      # Static assets
 ├── docs/
 │   └── screenshots/             # README screenshots (add your images here)
-├── package.json                 # npm configuration
+├── package.json                 # Package configuration
 └── README.md                   # This file
 ```
 
@@ -181,7 +182,7 @@ mine-roku/
 
 ### Testing
 - Vitest + Testing Library (jsdom)
-- Run tests with coverage: `npm test`
+- Run tests with coverage: `pnpm test`
 
 ### Adding New Features
 1. Add new Tauri commands in `src-tauri/src/commands.rs`
@@ -213,8 +214,8 @@ ensure both lists contain the same number of entries so each architecture pairs 
 corresponding Rust compilation target. Mismatched lists will cause the build to fail.
 
 Android verification commands:
-- `npm run android:lint`
-- `npm run android:test`
+- `pnpm android:lint`
+- `pnpm android:test`
 
 Signing setup:
 - Copy `src-tauri/gen/android/keystore.properties.example` to `src-tauri/gen/android/keystore.properties`

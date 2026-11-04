@@ -13,7 +13,7 @@ This document is the map. The [README](README.md) covers what the app *does*; th
  │   │  React webview │ ───────────────────▶ │  Rust core (src-tauri/src/)    │      │
  │   │  (src/)        │ ◀─────────────────── │   • commands.rs (logic)        │      │
  │   │  Zustand store │       events         │   • lib.rs (cmd wrappers,      │      │
- │   │  MUI v7        │                      │     JNI exports, app builder)  │      │
+ │   │  MUI v9        │                      │     JNI exports, app builder)  │      │
  │   └────────────────┘                      │   • background.rs (SQLite)     │      │
  │                                           │   • background_discovery.rs    │      │
  │            ▲                              └──────────────┬─────────────────┘      │
@@ -60,7 +60,7 @@ Entry path: [src/main.tsx](src/main.tsx) mounts [src/App.tsx](src/App.tsx), whic
 
 **Caches.** [src/iconCache.ts](src/iconCache.ts) is an in-memory LRU (~1h TTL, ~100 items) layered over the backend's SQLite icon cache — first the React component checks memory, then asks the backend, which either returns its row or fetches from the Roku.
 
-**Styling.** MUI v7 dark theme in [src/theme.ts](src/theme.ts) with Emotion. The four remote style presets come from design tokens, not separate component trees.
+**Styling.** MUI v9 dark theme in [src/theme.ts](src/theme.ts) with Emotion. The four remote style presets come from design tokens, not separate component trees.
 
 **Tests.** Vitest + Testing Library (jsdom). Specs sit beside the file under test (`Foo.test.tsx`). [src/setupTests.ts](src/setupTests.ts) installs the Tauri invoke/event mocks every test inherits; [src/testUtils.tsx](src/testUtils.tsx) provides shared render helpers. Don't ad-hoc-mock Tauri inside individual tests — extend the setup file instead.
 
@@ -96,7 +96,7 @@ Files:
 ## Native crates (`crates/`)
 
 - [crates/roku/](crates/roku/) — vendored fork of Carlo Abelli's `roku` crate. Provides the typed ECP `Device` (apps, active_app, media_player, keypress/down/up, launch, device_info, input, search) and serde-xml-rs models. All HTTP to Roku boxes funnels through this crate; backend code that builds raw URLs itself is the exception, not the rule.
-- [crates/ssdp-client/](crates/ssdp-client/) — **currently an empty directory.** [src-tauri/Cargo.toml](src-tauri/Cargo.toml) declares a path dep on it and a `[patch.crates-io]` override, but the real SSDP work is done by the upstream `ssdp-client` crate (pulled in transitively by `roku`). If you see this placeholder and start hunting for SSDP code: it's in [src-tauri/src/commands.rs](src-tauri/src/commands.rs) (`discover_roku_devices_impl`) and [src-tauri/src/background_discovery.rs](src-tauri/src/background_discovery.rs), not here.
+- [crates/ssdp-client/](crates/ssdp-client/) — vendored copy of upstream `ssdp-client` v2.1.0 with Android patches in [src/search.rs](crates/ssdp-client/src/search.rs): it finds the WiFi interface address and binds the socket to `wlan0` so discovery works with a VPN active. Both `src-tauri` and `roku` use this copy through `[patch.crates-io]` in [src-tauri/Cargo.toml](src-tauri/Cargo.toml). The discovery logic that calls it is in [src-tauri/src/commands.rs](src-tauri/src/commands.rs) (`discover_roku_devices_impl`) and [src-tauri/src/background_discovery.rs](src-tauri/src/background_discovery.rs).
 
 ## Persistence: SQLite
 
@@ -133,8 +133,13 @@ Kotlin sources live under [src-tauri/gen/android/app/src/main/java/com/rokucontr
 
 - `Java_…_MediaSessionManager_nativeSendRokuCommand` → `send_roku_command_impl`
 - `Java_…_MediaSessionManager_nativeGetAppIconDataUrl` → `get_app_icon_impl`
+- `Java_…_MainActivity_nativeOnActivityCreated` / `nativeOnActivityDestroyed` → keep the `CURRENT_ACTIVITY` reference that `with_activity` uses
 
 This is *why* the `_impl`/wrapper split exists — both Tauri commands and Kotlin transport controls call the same underlying functions.
+
+**Calling the activity from Rust.** Don't get it from `ndk_context::android_context().context()`: since tao 0.37 that is the Application context, so calls to `MainActivity` methods fail at runtime with "Method not found". Use `with_activity`, which works from any thread.
+
+**Edge-to-edge.** Android draws behind the system bars for targetSdk 35+, so `MainActivity.keepContentClearOfSystemBars` pads the WebView's container for the status bar, navigation bar, display cutout, and keyboard. Because it consumes those insets, CSS `env(safe-area-inset-*)` resolves to 0 in the WebView.
 
 **Permissions.** Discovery needs nearby-devices / location; notifications need `POST_NOTIFICATIONS`; SSDP needs a held WiFi multicast lock for the duration of the scan. The Rust wrappers acquire and release these around `discover_roku_devices_impl` (see [lib.rs:248-276](src-tauri/src/lib.rs:248)).
 
@@ -144,13 +149,13 @@ This is *why* the `_impl`/wrapper split exists — both Tauri commands and Kotli
 
 Frontend / app:
 
-- `npm run tauri dev` — full app, hot reload on both frontend and Rust.
-- `npm run dev` — Vite only, useful when working on UI with the backend mocked.
-- `npm run build` — `tsc` + Vite production build.
-- `npm run tauri build` — desktop bundle.
-- `npm test` — Vitest with v8 coverage.
+- `pnpm tauri dev` — full app, hot reload on both frontend and Rust.
+- `pnpm dev` — Vite only, useful when working on UI with the backend mocked.
+- `pnpm build` — `tsc` + Vite production build.
+- `pnpm tauri build` — desktop bundle.
+- `pnpm test` — Vitest with v8 coverage.
 
-Vite ([vite.config.ts](vite.config.ts)) splits `react` and `mui` into manual chunks (warning threshold 900KB) and serves over `TAURI_DEV_HOST` for device-over-LAN HMR.
+Vite ([vite.config.ts](vite.config.ts)) splits `react` and `mui` into chunks with Rolldown `codeSplitting` groups (warning threshold 900KB) and serves over `TAURI_DEV_HOST` for device-over-LAN HMR.
 
 Rust:
 
@@ -160,9 +165,9 @@ Rust:
 
 Android:
 
-- `npm run android:lint` → `./gradlew :app:lintArm64Debug -x rustBuildArm64Debug`
-- `npm run android:test` → `./gradlew :app:testArm64DebugUnitTest -x rustBuildArm64Debug`
-- CI: [.github/workflows/android-mobile.yml](.github/workflows/android-mobile.yml) runs both on push/PR. The Rust build is intentionally skipped in CI to keep the lane fast; locally, use `npm run tauri android dev` or the Gradle tasks without the `-x rustBuildArm64Debug` exclusion.
+- `pnpm android:lint` → `./gradlew :app:lintArm64Debug -x rustBuildArm64Debug`
+- `pnpm android:test` → `./gradlew :app:testArm64DebugUnitTest -x rustBuildArm64Debug`
+- CI: [.github/workflows/android-mobile.yml](.github/workflows/android-mobile.yml) runs both on push/PR. The Rust build is intentionally skipped in CI to keep the lane fast; locally, use `pnpm tauri android dev` or the Gradle tasks without the `-x rustBuildArm64Debug` exclusion.
 - Signing: copy `src-tauri/gen/android/keystore.properties.example` to `keystore.properties` and fill in local values. Do not commit the real file.
 
 ## Conventions worth knowing
@@ -172,4 +177,6 @@ Android:
 - **One backend call site per behavior.** Logic goes in `commands.rs` as `xxx_impl`; the `#[command]` wrapper in `lib.rs` does platform glue only. Both Tauri IPC and JNI depend on this.
 - **Mock Tauri in the setup file.** Per-test mocks of `invoke`/`listen` drift apart — extend [src/setupTests.ts](src/setupTests.ts) instead.
 - **Gate Android-only Rust with `#[cfg(target_os = "android")]`** and provide a desktop fallback in the same file (see how `update_media_notification` is defined twice in [lib.rs](src-tauri/src/lib.rs)). The `generate_handler!` list must compile on every target.
-- **The empty `crates/ssdp-client/` is a footgun.** If you grep for SSDP code there you'll find nothing; the real work is in `src-tauri/src/commands.rs` and `src-tauri/src/background_discovery.rs`, and the actual library is the upstream `ssdp-client` crate pulled in via `roku`.
+- **`crates/ssdp-client/` is patched, not stock.** Replacing it with the crates.io release removes the Android `wlan0`/VPN handling. To upgrade it, re-apply those changes to the new upstream version.
+- **Zustand selectors must return stable values.** A selector that builds a new object or array on each call causes an infinite render loop. Wrap object selectors in `useShallow`, and use a shared constant for empty fallbacks rather than `|| []`.
+- **Use `color="textSecondary"` on `Typography`, not `color="text.secondary"`.** MUI 9 removed system props, and the dotted form still type-checks because `color` is also an HTML attribute, but it no longer applies any color. In `sx`, `color: 'text.secondary'` still works.
