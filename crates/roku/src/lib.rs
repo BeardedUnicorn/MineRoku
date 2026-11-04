@@ -41,7 +41,7 @@ impl Device {
 
     pub async fn discover() -> Result<Vec<Device>> {
         let search_target = SearchTarget::Custom("roku".to_string(), "ecp".to_string());
-        let mut responses = search(&search_target, Duration::from_secs(3), 2).await?;
+        let mut responses = search(&search_target, Duration::from_secs(3), 2, None).await?;
         let mut devices = vec![];
         while let Some(response) = responses.next().await {
             let response = response?;
@@ -151,20 +151,25 @@ pub struct ActiveApp {
 
 #[derive(Debug, Deserialize)]
 pub struct App {
+    #[serde(rename = "@id")]
     pub id: Option<String>,
-    #[serde(rename = "$value")]
+    #[serde(rename = "#text")]
     pub name: String,
+    #[serde(rename = "@version")]
     pub version: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct Screensaver {
+    #[serde(rename = "@black")]
     pub black: Option<bool>,
+    #[serde(rename = "@id")]
     pub id: String,
-    #[serde(rename = "$value")]
+    #[serde(rename = "#text")]
     pub name: String,
-    #[serde(rename = "type")]
+    #[serde(rename = "@type")]
     pub screensaver_type: String,
+    #[serde(rename = "@version")]
     pub version: String,
 }
 
@@ -172,6 +177,7 @@ pub struct Screensaver {
 pub struct MediaPlayer {
     pub buffering: Option<Buffering>,
     pub duration: Option<String>,
+    #[serde(rename = "@error")]
     pub error: bool,
     pub format: Option<Format>,
     pub is_live: Option<bool>,
@@ -179,44 +185,62 @@ pub struct MediaPlayer {
     pub plugin: Option<Plugin>,
     pub position: Option<String>,
     pub runtime: Option<String>,
+    #[serde(rename = "@state")]
     pub state: String,
     pub stream_segment: Option<StreamSegment>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct Plugin {
+    #[serde(rename = "@bandwidth")]
     pub bandwidth: String,
+    #[serde(rename = "@id")]
     pub id: String,
+    #[serde(rename = "@name")]
     pub name: String,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct Format {
+    #[serde(rename = "@audio")]
     pub audio: String,
+    #[serde(rename = "@captions")]
     pub captions: String,
+    #[serde(rename = "@container")]
     pub container: String,
+    #[serde(rename = "@drm")]
     pub drm: String,
+    #[serde(rename = "@video")]
     pub video: String,
+    #[serde(rename = "@video_res")]
     pub video_res: String,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct Buffering {
+    #[serde(rename = "@current")]
     pub current: u32,
+    #[serde(rename = "@max")]
     pub max: u32,
+    #[serde(rename = "@target")]
     pub target: u32,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct NewStream {
+    #[serde(rename = "@speed")]
     pub speed: String,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct StreamSegment {
+    #[serde(rename = "@bitrate")]
     pub bitrate: u32,
+    #[serde(rename = "@media_sequence")]
     pub media_sequence: u32,
+    #[serde(rename = "@segment_type")]
     pub segment_type: String,
+    #[serde(rename = "@time")]
     pub time: u32,
 }
 
