@@ -26,23 +26,67 @@ mod android {
     use super::{get_app_icon_impl, send_roku_command_impl};
     use jni::errors::LogErrorAndDefault;
     use jni::objects::{JClass, JObject, JString};
+    use jni::refs::Global;
     use jni::sys::{jboolean, jint};
     use jni::{jni_sig, jni_str, Env, EnvUnowned, JValue, JavaVM};
+    use std::sync::{Arc, Mutex};
+
+    /// The live `MainActivity`, registered by the activity itself. `ndk_context` can't supply it:
+    /// since tao 0.37 it holds the Application context, which doesn't have the activity's methods.
+    static CURRENT_ACTIVITY: Mutex<Option<Arc<Global<JObject<'static>>>>> = Mutex::new(None);
 
     fn with_activity<R>(
         f: impl FnOnce(&mut Env<'_>, &JObject<'_>) -> jni::errors::Result<R>,
     ) -> Result<R, String> {
+        let activity = CURRENT_ACTIVITY
+            .lock()
+            .map_err(|e| e.to_string())?
+            .clone()
+            .ok_or_else(|| "Android activity is not available".to_string())?;
         let context = ndk_context::android_context();
         let vm = unsafe { JavaVM::from_raw(context.vm().cast()) };
-        vm.attach_current_thread(|env| {
-            let activity =
-                unsafe { JObject::from_raw(env, context.context() as jni::sys::jobject) };
-            let result = f(env, &activity);
-            // ndk_context owns this global reference, so it must not be released here.
-            let _ = activity.into_raw();
-            result
-        })
-        .map_err(|e: jni::errors::Error| e.to_string())
+        vm.attach_current_thread(|env| f(env, activity.as_obj()))
+            .map_err(|e: jni::errors::Error| e.to_string())
+    }
+
+    #[no_mangle]
+    pub extern "system" fn Java_com_rokucontroller_remote_MainActivity_nativeOnActivityCreated<
+        'caller,
+    >(
+        mut unowned_env: EnvUnowned<'caller>,
+        activity: JObject<'caller>,
+    ) {
+        unowned_env
+            .with_env(|env| -> jni::errors::Result<()> {
+                let activity = env.new_global_ref(&activity)?;
+                *CURRENT_ACTIVITY.lock().unwrap_or_else(|e| e.into_inner()) =
+                    Some(Arc::new(activity));
+                Ok(())
+            })
+            .resolve::<LogErrorAndDefault>()
+    }
+
+    #[no_mangle]
+    pub extern "system" fn Java_com_rokucontroller_remote_MainActivity_nativeOnActivityDestroyed<
+        'caller,
+    >(
+        mut unowned_env: EnvUnowned<'caller>,
+        activity: JObject<'caller>,
+    ) {
+        unowned_env
+            .with_env(|env| -> jni::errors::Result<()> {
+                let mut current = CURRENT_ACTIVITY.lock().unwrap_or_else(|e| e.into_inner());
+                // A replacement activity can be created before the old one is destroyed.
+                let is_current = match current.as_ref() {
+                    Some(held) => env.is_same_object(held.as_obj(), &activity)?,
+                    None => false,
+                };
+                if is_current {
+                    *current = None;
+                }
+                Ok(())
+            })
+            .resolve::<LogErrorAndDefault>()
     }
 
     pub(super) fn ensure_discovery_permissions() -> Result<bool, String> {

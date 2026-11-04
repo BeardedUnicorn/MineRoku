@@ -1,6 +1,7 @@
 import java.io.FileInputStream
 import java.util.Properties
 import org.gradle.api.JavaVersion
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     id("com.android.application")
@@ -17,13 +18,13 @@ val tauriProperties = Properties().apply {
 }
 
 android {
-    compileSdk = 34
+    compileSdk = 36
     namespace = "com.rokucontroller.remote"
 
     defaultConfig {
         applicationId = "com.rokucontroller.remote"
         minSdk = 24
-        targetSdk = 34
+        targetSdk = 36
         versionCode = tauriProperties
             .getProperty("tauri.android.versionCode", "1")
             .toInt()
@@ -75,12 +76,14 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
-    }
-
     buildFeatures {
         buildConfig = true
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget = JvmTarget.JVM_17
     }
 }
 
@@ -89,11 +92,11 @@ rust {
 }
 
 dependencies {
-    implementation("androidx.webkit:webkit:1.15.0")
-    implementation("androidx.appcompat:appcompat:1.7.1")
-    implementation("com.google.android.material:material:1.13.0")
-    implementation("androidx.media:media:1.7.1")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+    implementation("androidx.webkit:webkit:1.18.0")
+    implementation("androidx.appcompat:appcompat:1.8.0")
+    implementation("com.google.android.material:material:1.14.0")
+    implementation("androidx.media:media:1.8.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")

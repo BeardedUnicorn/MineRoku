@@ -1,6 +1,7 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
     <!-- Base application theme. -->
     <style name="Theme.roku_controller" parent="Theme.MaterialComponents.DayNight.NoActionBar">
-        <!-- Customize your theme here. -->
+        <!-- Shows behind the system bars, so it has to match the app's dark background. -->
+        <item name="android:windowBackground">@color/app_background</item>
     </style>
 </resources>

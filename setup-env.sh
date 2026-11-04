@@ -45,7 +45,7 @@ if [[ "$OS" == "Darwin" ]]; then
   export ANDROID_SDK_ROOT="$ANDROID_SDK"
   export PATH="$ANDROID_SDK/cmdline-tools/latest/bin:$ANDROID_SDK/platform-tools:$PATH"
   yes | sdkmanager --licenses >/dev/null
-  sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0" "ndk;26.1.10909125"
+  sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0" "ndk;26.1.10909125"
 
 elif [[ "$OS" =~ MINGW|MSYS|CYGWIN ]]; then
   # ----- Windows (Git Bash / MSYS2) -----
@@ -76,7 +76,7 @@ elif [[ "$OS" =~ MINGW|MSYS|CYGWIN ]]; then
   export ANDROID_SDK_ROOT="$ANDROID_SDK"
   export PATH="$ANDROID_SDK/cmdline-tools/latest/bin:$ANDROID_SDK/platform-tools:$PATH"
   yes | sdkmanager --licenses >/dev/null
-  sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0" "ndk;26.1.10909125"
+  sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0" "ndk;26.1.10909125"
 else
   echo "Unsupported OS: $OS"
   exit 1
