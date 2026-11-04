@@ -2,7 +2,7 @@ import React from 'react';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { remoteStylePresets, type RemoteStylePreset, useAppStore, RokuDevice } from '../store';
 import { iconCache } from '../iconCache';
-import { shallow } from 'zustand/shallow';
+import { useShallow } from 'zustand/react/shallow';
 import {
     Drawer, List, ListItemButton, ListItemText,
     Typography, Box, IconButton, Divider, CircularProgress, Tooltip, useTheme, useMediaQuery,
@@ -26,8 +26,7 @@ interface SidebarProps {
 
 const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, scanForDevices, isScanning }) => {
     const { devices, selectedDevice } = useAppStore(
-        (s) => ({ devices: s.devices, selectedDevice: s.selectedDevice }),
-        shallow
+        useShallow((s) => ({ devices: s.devices, selectedDevice: s.selectedDevice }))
     );
     const setSelectedDevice = useAppStore((s) => s.setSelectedDevice);
     const preferLastUsed = useAppStore((s) => s.preferLastUsed);
@@ -153,10 +152,12 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, scanForDevices, isS
                             <ListItemText 
                                 primary={device.name} 
                                 secondary={device.ip}
-                                secondaryTypographyProps={{
-                                    sx: { 
-                                        fontSize: '0.75rem',
-                                        opacity: device.status === 'connected' ? 1 : 0.6
+                                slotProps={{
+                                    secondary: {
+                                        sx: {
+                                            fontSize: '0.75rem',
+                                            opacity: device.status === 'connected' ? 1 : 0.6
+                                        }
                                     }
                                 }}
                             />
@@ -174,7 +175,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, scanForDevices, isS
                         </ListItemButton>
                     ))}
                     {!visibleDevices.length && (
-                        <Typography variant="body2" color="text.secondary" sx={{ p: 2 }} role="status" aria-live="polite">
+                        <Typography variant="body2" color="textSecondary" sx={{ p: 2 }} role="status" aria-live="polite">
                             {isScanning
                                 ? 'Scanning for devices…'
                                 : showAllDevices
@@ -239,7 +240,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, scanForDevices, isS
                         }
                         label="Show all discovered devices"
                     />
-                    <Typography variant="caption" color="text.secondary">
+                    <Typography variant="caption" color="textSecondary">
                         When disabled, only connected devices are shown. Your selected device stays visible even if it goes offline.
                     </Typography>
                     <FormControl fullWidth size="small">
@@ -258,13 +259,13 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, scanForDevices, isS
                             ))}
                         </Select>
                     </FormControl>
-                    <Typography variant="caption" color="text.secondary">
+                    <Typography variant="caption" color="textSecondary">
                         Applies to the remote on mobile and desktop.
                     </Typography>
                     
                     <Divider sx={{ my: 2 }} />
                     
-                    <Typography variant="subtitle2" color="text.secondary">
+                    <Typography variant="subtitle2" color="textSecondary">
                         Data Management
                     </Typography>
                     <Button
@@ -276,7 +277,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, scanForDevices, isS
                     >
                         Delete All Data
                     </Button>
-                    <Typography variant="caption" color="text.secondary">
+                    <Typography variant="caption" color="textSecondary">
                         This will remove all saved devices, favorites, cached icons, and settings. The app will restart afterward.
                     </Typography>
                 </Stack>

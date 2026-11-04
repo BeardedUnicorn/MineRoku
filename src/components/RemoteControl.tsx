@@ -682,7 +682,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
               </Typography>
             </>
           ) : (
-            <Typography variant="body2" color="text.secondary">
+            <Typography variant="body2" color="textSecondary">
               Home Screen
             </Typography>
           )}
@@ -718,9 +718,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
       <Stack
         direction="row"
         spacing={2}
-        alignItems="center"
-        justifyContent="center"
-        sx={{ width: '100%', mt: 1 }}
+        sx={{ alignItems: 'center', justifyContent: 'center', width: '100%', mt: 1 }}
       >
         {systemButtons.map((b) => (
           <RemoteButton
@@ -830,7 +828,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
         </Box>
       </Box>
 
-      <Stack direction="row" spacing={{ xs: 1, sm: 2 }} justifyContent="center" alignItems="center" sx={{ width: '100%', mt: 1 }} >
+      <Stack direction="row" spacing={{ xs: 1, sm: 2 }} sx={{ justifyContent: 'center', alignItems: 'center', width: '100%', mt: 1 }} >
         {playbackButtons.map((b) => (
           <RemoteButton
             key={b.key}
@@ -848,7 +846,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
 
       <Divider flexItem variant="middle" sx={{ opacity: styleTokens.dividerOpacity, width: '80%', my: 1 }} />
 
-      <Stack direction="row" spacing={{ xs: 1, sm: 2 }} justifyContent="center" alignItems="center" sx={{ width: '100%' }} >
+      <Stack direction="row" spacing={{ xs: 1, sm: 2 }} sx={{ justifyContent: 'center', alignItems: 'center', width: '100%' }} >
         {volumeButtons.map((b) => (
           <RemoteButton
             key={b.key}
