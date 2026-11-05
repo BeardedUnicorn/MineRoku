@@ -167,7 +167,7 @@ Android:
 
 - `pnpm android:lint` → `./gradlew :app:lintArm64Debug -x rustBuildArm64Debug`
 - `pnpm android:test` → `./gradlew :app:testArm64DebugUnitTest -x rustBuildArm64Debug`
-- CI: [.github/workflows/android-mobile.yml](.github/workflows/android-mobile.yml) runs both on push/PR. The Rust build is intentionally skipped in CI to keep the lane fast; locally, use `pnpm tauri android dev` or the Gradle tasks without the `-x rustBuildArm64Debug` exclusion.
+- CI: [.github/workflows/android-mobile.yml](.github/workflows/android-mobile.yml) runs both on push/PR. Gradle's Rust build is skipped to keep the lane fast, so CI first runs `cargo check` for `aarch64-linux-android`: its build scripts generate the gitignored `tauri.settings.gradle` and `generated/*.kt` that Gradle needs. Locally, use `pnpm tauri android dev` or the Gradle tasks without the `-x rustBuildArm64Debug` exclusion.
 - Signing: copy `src-tauri/gen/android/keystore.properties.example` to `keystore.properties` and fill in local values. Do not commit the real file.
 
 ## Conventions worth knowing
