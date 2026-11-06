@@ -266,10 +266,15 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
   const deviceStatusRef = useRef<RokuDevice['status']>(device.status);
   const remoteStyle = useAppStore((s) => s.remoteStyle);
   const isPhone = useMediaQuery(theme.breakpoints.down('sm'));
+  // The 300px phone D-pad needs 300 + 52 (page gutters) + 4 (card border) to avoid clipping.
+  const fitsPhoneDpad = useMediaQuery('(min-width:356px)');
   const currentPlatform = usePlatform();
   const notificationPermissionReadyRef = useRef(currentPlatform !== 'android');
   const activeAppIcon = useActiveAppIcon(device, activeApp);
-  const dpadMetrics = useMemo(() => getDpadMetrics(isPhone), [isPhone]);
+  const dpadMetrics = useMemo(
+    () => getDpadMetrics(isPhone && fitsPhoneDpad),
+    [isPhone, fitsPhoneDpad]
+  );
   const dpadSize = useMemo(() => getDpadSize(dpadMetrics), [dpadMetrics]);
   const styleTokens = useMemo(
     () => getRemoteStyleTokens(remoteStyle, theme),
@@ -608,7 +613,8 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
       sx={{
         mx: 'auto',
         width: '100%',
-        maxWidth: { xs: 380, sm: 340, md: 320 },
+        boxSizing: 'border-box',
+        maxWidth: { xs: 422, sm: 390, md: 320 },
         borderRadius: '42px',
         px: { xs: 2.5, sm: 3 },
         py: { xs: 3, sm: 4 },
@@ -738,6 +744,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
       </Stack>
 
       <Box
+        data-testid="remote-dpad"
         sx={{
           position: 'relative',
           width: dpadSize,
