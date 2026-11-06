@@ -7,9 +7,13 @@ import android.content.pm.PackageManager
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Bundle
+import android.view.View
 import androidx.annotation.Keep
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 
 class MainActivity : TauriActivity() {
     private var multicastLock: WifiManager.MulticastLock? = null
@@ -20,13 +24,39 @@ class MainActivity : TauriActivity() {
         private const val NOTIFICATION_PERMISSION_REQUEST_CODE = 1002
     }
 
+    private external fun nativeOnActivityCreated()
+    private external fun nativeOnActivityDestroyed()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        nativeOnActivityCreated()
+        keepContentClearOfSystemBars()
     }
 
     override fun onDestroy() {
+        nativeOnActivityDestroyed()
         releaseDiscoveryLocks()
         super.onDestroy()
+    }
+
+    // Android draws edge-to-edge for targetSdk 35+, so the WebView would otherwise sit under the
+    // status bar, navigation bar, and keyboard.
+    private fun keepContentClearOfSystemBars() {
+        WindowCompat.getInsetsController(window, window.decorView).apply {
+            // The UI is always dark, whatever the system theme is.
+            isAppearanceLightStatusBars = false
+            isAppearanceLightNavigationBars = false
+        }
+
+        ViewCompat.setOnApplyWindowInsetsListener(findViewById<View>(android.R.id.content)) { view, insets ->
+            val bars = insets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or
+                    WindowInsetsCompat.Type.displayCutout() or
+                    WindowInsetsCompat.Type.ime()
+            )
+            view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+            WindowInsetsCompat.CONSUMED
+        }
     }
 
     @Keep

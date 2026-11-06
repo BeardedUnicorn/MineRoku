@@ -42,6 +42,8 @@ const CARD_ESTIMATED_HEIGHT = 260; // CardMedia (120px) + CardContent (~140px)
 const GRID_GAP = 16; // MUI spacing of 2
 const MIN_ITEMS_PER_PAGE = 6;
 const MAX_ITEMS_PER_PAGE = 60;
+// Stable reference: zustand re-renders whenever a selector returns a new value.
+const NO_FAVORITES: string[] = [];
 
 const AppIcon: React.FC<{ device: RokuDevice; appId: string; appName: string; size?: number }> = ({ device, appId, appName, size = 120 }) => {
     const cacheKey = `${device.ip}:${device.port}:${appId}`;
@@ -129,10 +131,8 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
     const gridRef = useRef<HTMLDivElement>(null);
 
     // Use hardware_id for favorites
-    const { favoriteApps, toggleFavoriteApp } = useAppStore((state) => ({
-        favoriteApps: state.favoriteApps[device.hardware_id] || [],
-        toggleFavoriteApp: state.toggleFavoriteApp,
-    }));
+    const favoriteApps = useAppStore((state) => state.favoriteApps[device.hardware_id] ?? NO_FAVORITES);
+    const toggleFavoriteApp = useAppStore((state) => state.toggleFavoriteApp);
 
     const favoriteAppDetails = useMemo(() => {
         if (favoriteApps.length === 0 || apps.length === 0) {
@@ -423,12 +423,14 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
                         sx={{ minWidth: '250px' }}
-                        InputProps={{
-                            startAdornment: (
-                                <InputAdornment position="start">
-                                    <SearchIcon />
-                                </InputAdornment>
-                            ),
+                        slotProps={{
+                            input: {
+                                startAdornment: (
+                                    <InputAdornment position="start">
+                                        <SearchIcon />
+                                    </InputAdornment>
+                                ),
+                            },
                         }}
                     />
                     <Button variant="outlined" size="medium" onClick={handleRefreshClick} disabled={isLoading} startIcon={<RefreshIcon />}>
@@ -459,7 +461,7 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
                                                 {app.name}
                                             </Typography>
                                         </Tooltip>
-                                        <Typography variant="caption" color="text.secondary">ID: {app.id}</Typography>
+                                        <Typography variant="caption" color="textSecondary">ID: {app.id}</Typography>
                                         <Box sx={{ mt: 'auto', pt: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
                                             <Button
                                                 fullWidth
@@ -501,8 +503,8 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
                 ) : (
                     <Box sx={{ textAlign: 'center', p: 4, mt: 4, border: '1px dashed', borderColor: 'divider', borderRadius: 2 }}>
                         <SearchIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
-                        <Typography variant="h6" color="text.secondary">No matching apps found</Typography>
-                        <Typography variant="body1" color="text.secondary" sx={{ mt: 1 }}>
+                        <Typography variant="h6" color="textSecondary">No matching apps found</Typography>
+                        <Typography variant="body1" color="textSecondary" sx={{ mt: 1 }}>
                             Try clearing your search or refreshing the list.
                         </Typography>
                     </Box>

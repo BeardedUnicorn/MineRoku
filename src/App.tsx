@@ -23,7 +23,7 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import BottomNavBar from './components/BottomNavBar';
 import './App.css';
 import { useAppStore, type RokuDevice } from './store';
-import { shallow } from 'zustand/shallow';
+import { useShallow } from 'zustand/react/shallow';
 import { usePlatform } from './hooks/usePlatform';
 import { dismissSplash } from './splash';
 import {
@@ -89,7 +89,7 @@ const App: React.FC = () => {
     markDeviceDisconnected,
     updateDeviceStatus,
   } = useAppStore(
-    (s) => ({
+    useShallow((s) => ({
       selectedDevice: s.selectedDevice,
       devices: s.devices,
       addDiscoveredDevices: s.addDiscoveredDevices,
@@ -97,8 +97,7 @@ const App: React.FC = () => {
       upsertDevice: s.upsertDevice,
       markDeviceDisconnected: s.markDeviceDisconnected,
       updateDeviceStatus: s.updateDeviceStatus,
-    }),
-    shallow
+    }))
   );
 
   const [isSearching, setIsSearching] = useState(true);
@@ -366,11 +365,11 @@ const App: React.FC = () => {
           aria-live="polite"
         >
           <CircularProgress />
-          <Typography variant="h6" color="text.secondary">
+          <Typography variant="h6" color="textSecondary">
             Searching for Roku devices…
           </Typography>
           {scanStatus && (
-            <Typography variant="body2" color="text.secondary">
+            <Typography variant="body2" color="textSecondary">
               {scanStatus}
             </Typography>
           )}
@@ -393,10 +392,10 @@ const App: React.FC = () => {
           }}
         >
           <SearchOffIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
-          <Typography variant="h6" color="text.secondary">
+          <Typography variant="h6" color="textSecondary">
             No Roku Devices Found
           </Typography>
-          <Typography variant="body1" color="text.secondary" sx={{ mt: 1 }}>
+          <Typography variant="body1" color="textSecondary" sx={{ mt: 1 }}>
             Please ensure your Roku is powered on and connected to the same WiFi network. Tap
             refresh to scan again.
           </Typography>
@@ -443,7 +442,7 @@ const App: React.FC = () => {
         }}
       >
         <TvIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
-        <Typography variant="h6" color="text.secondary">
+        <Typography variant="h6" color="textSecondary">
           Select a device to begin
         </Typography>
       </Paper>

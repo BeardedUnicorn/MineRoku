@@ -24,61 +24,115 @@ use tauri_plugin_opener::init as opener;
 #[cfg(target_os = "android")]
 mod android {
     use super::{get_app_icon_impl, send_roku_command_impl};
-    use jni::objects::{JClass, JObject, JString, JValue};
-    use jni::sys::{jboolean, jint, jstring, JNI_FALSE, JNI_TRUE};
-    use jni::{JNIEnv, JavaVM};
+    use jni::errors::LogErrorAndDefault;
+    use jni::objects::{JClass, JObject, JString};
+    use jni::refs::Global;
+    use jni::sys::{jboolean, jint};
+    use jni::{jni_sig, jni_str, Env, EnvUnowned, JValue, JavaVM};
+    use std::sync::{Arc, Mutex};
+
+    /// The live `MainActivity`, registered by the activity itself. `ndk_context` can't supply it:
+    /// since tao 0.37 it holds the Application context, which doesn't have the activity's methods.
+    static CURRENT_ACTIVITY: Mutex<Option<Arc<Global<JObject<'static>>>>> = Mutex::new(None);
 
     fn with_activity<R>(
-        f: impl FnOnce(&mut JNIEnv<'_>, &JObject<'_>) -> Result<R, String>,
+        f: impl FnOnce(&mut Env<'_>, &JObject<'_>) -> jni::errors::Result<R>,
     ) -> Result<R, String> {
+        let activity = CURRENT_ACTIVITY
+            .lock()
+            .map_err(|e| e.to_string())?
+            .clone()
+            .ok_or_else(|| "Android activity is not available".to_string())?;
         let context = ndk_context::android_context();
-        let vm = unsafe { JavaVM::from_raw(context.vm().cast()) }.map_err(|e| e.to_string())?;
-        let mut env = vm.attach_current_thread().map_err(|e| e.to_string())?;
-        let activity = unsafe { JObject::from_raw(context.context() as jni::sys::jobject) };
-
-        let result = f(&mut env, &activity);
-        let _ = activity.into_raw();
-        result
+        let vm = unsafe { JavaVM::from_raw(context.vm().cast()) };
+        vm.attach_current_thread(|env| f(env, activity.as_obj()))
+            .map_err(|e: jni::errors::Error| e.to_string())
     }
 
-    fn jstring_to_rust_string(env: &mut JNIEnv<'_>, value: JString<'_>) -> Result<String, String> {
-        env.get_string(&value)
-            .map_err(|e| e.to_string())?
-            .to_str()
-            .map_err(|e| e.to_string())
-            .map(std::string::ToString::to_string)
+    #[no_mangle]
+    pub extern "system" fn Java_com_rokucontroller_remote_MainActivity_nativeOnActivityCreated<
+        'caller,
+    >(
+        mut unowned_env: EnvUnowned<'caller>,
+        activity: JObject<'caller>,
+    ) {
+        unowned_env
+            .with_env(|env| -> jni::errors::Result<()> {
+                let activity = env.new_global_ref(&activity)?;
+                *CURRENT_ACTIVITY.lock().unwrap_or_else(|e| e.into_inner()) =
+                    Some(Arc::new(activity));
+                Ok(())
+            })
+            .resolve::<LogErrorAndDefault>()
+    }
+
+    #[no_mangle]
+    pub extern "system" fn Java_com_rokucontroller_remote_MainActivity_nativeOnActivityDestroyed<
+        'caller,
+    >(
+        mut unowned_env: EnvUnowned<'caller>,
+        activity: JObject<'caller>,
+    ) {
+        unowned_env
+            .with_env(|env| -> jni::errors::Result<()> {
+                let mut current = CURRENT_ACTIVITY.lock().unwrap_or_else(|e| e.into_inner());
+                // A replacement activity can be created before the old one is destroyed.
+                let is_current = match current.as_ref() {
+                    Some(held) => env.is_same_object(held.as_obj(), &activity)?,
+                    None => false,
+                };
+                if is_current {
+                    *current = None;
+                }
+                Ok(())
+            })
+            .resolve::<LogErrorAndDefault>()
     }
 
     pub(super) fn ensure_discovery_permissions() -> Result<bool, String> {
         with_activity(|env, activity| {
-            env.call_method(activity, "ensureDiscoveryPermissions", "()Z", &[])
-                .map_err(|e| e.to_string())?
-                .z()
-                .map_err(|e| e.to_string())
+            env.call_method(
+                activity,
+                jni_str!("ensureDiscoveryPermissions"),
+                jni_sig!("()Z"),
+                &[],
+            )?
+            .z()
         })
     }
 
     pub(super) fn ensure_notification_permission() -> Result<bool, String> {
         with_activity(|env, activity| {
-            env.call_method(activity, "ensureNotificationPermission", "()Z", &[])
-                .map_err(|e| e.to_string())?
-                .z()
-                .map_err(|e| e.to_string())
+            env.call_method(
+                activity,
+                jni_str!("ensureNotificationPermission"),
+                jni_sig!("()Z"),
+                &[],
+            )?
+            .z()
         })
     }
 
     pub(super) fn acquire_discovery_locks() -> Result<(), String> {
         with_activity(|env, activity| {
-            env.call_method(activity, "acquireDiscoveryLocks", "()V", &[])
-                .map_err(|e| e.to_string())?;
+            env.call_method(
+                activity,
+                jni_str!("acquireDiscoveryLocks"),
+                jni_sig!("()V"),
+                &[],
+            )?;
             Ok(())
         })
     }
 
     pub(super) fn release_discovery_locks() -> Result<(), String> {
         with_activity(|env, activity| {
-            env.call_method(activity, "releaseDiscoveryLocks", "()V", &[])
-                .map_err(|e| e.to_string())?;
+            env.call_method(
+                activity,
+                jni_str!("releaseDiscoveryLocks"),
+                jni_sig!("()V"),
+                &[],
+            )?;
             Ok(())
         })
     }
@@ -92,31 +146,24 @@ mod android {
         is_playing: bool,
     ) -> Result<(), String> {
         with_activity(|env, activity| {
-            let j_device_name = env.new_string(&device_name).map_err(|e| e.to_string())?;
-            let j_device_ip = env.new_string(&device_ip).map_err(|e| e.to_string())?;
-            let j_app_name = env.new_string(&app_name).map_err(|e| e.to_string())?;
-            let j_app_id = env
-                .new_string(app_id.as_deref().unwrap_or(""))
-                .map_err(|e| e.to_string())?;
-            let j_device_name_obj = JObject::from(j_device_name);
-            let j_device_ip_obj = JObject::from(j_device_ip);
-            let j_app_name_obj = JObject::from(j_app_name);
-            let j_app_id_obj = JObject::from(j_app_id);
+            let j_device_name = env.new_string(&device_name)?;
+            let j_device_ip = env.new_string(&device_ip)?;
+            let j_app_name = env.new_string(&app_name)?;
+            let j_app_id = env.new_string(app_id.as_deref().unwrap_or(""))?;
 
             env.call_method(
                 activity,
-                "updateMediaSession",
-                "(Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;Ljava/lang/String;Z)V",
+                jni_str!("updateMediaSession"),
+                jni_sig!("(Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;Ljava/lang/String;Z)V"),
                 &[
-                    JValue::Object(&j_device_name_obj),
-                    JValue::Object(&j_device_ip_obj),
+                    JValue::Object(&j_device_name),
+                    JValue::Object(&j_device_ip),
                     JValue::Int(device_port as i32),
-                    JValue::Object(&j_app_name_obj),
-                    JValue::Object(&j_app_id_obj),
-                    JValue::Bool(if is_playing { 1 } else { 0 }),
+                    JValue::Object(&j_app_name),
+                    JValue::Object(&j_app_id),
+                    JValue::Bool(is_playing),
                 ],
-            )
-            .map_err(|e| e.to_string())?;
+            )?;
 
             Ok(())
         })
@@ -124,8 +171,12 @@ mod android {
 
     pub(super) fn hide_media_notification() -> Result<(), String> {
         with_activity(|env, activity| {
-            env.call_method(activity, "hideMediaNotification", "()V", &[])
-                .map_err(|e| e.to_string())?;
+            env.call_method(
+                activity,
+                jni_str!("hideMediaNotification"),
+                jni_sig!("()V"),
+                &[],
+            )?;
             Ok(())
         })
     }
@@ -133,115 +184,100 @@ mod android {
     pub(super) fn open_app_settings() -> Result<(), String> {
         with_activity(|env, activity| {
             let package_name = env
-                .call_method(activity, "getPackageName", "()Ljava/lang/String;", &[])
-                .map_err(|e| e.to_string())?
-                .l()
-                .map_err(|e| e.to_string())?;
-            let package_name = jstring_to_rust_string(env, JString::from(package_name))?;
+                .call_method(
+                    activity,
+                    jni_str!("getPackageName"),
+                    jni_sig!("()Ljava/lang/String;"),
+                    &[],
+                )?
+                .l()?;
+            let package_name = env
+                .cast_local::<JString>(package_name)?
+                .try_to_string(env)?;
 
-            let action = env
-                .new_string("android.settings.APPLICATION_DETAILS_SETTINGS")
-                .map_err(|e| e.to_string())?;
-            let action_obj = JObject::from(action);
-            let intent = env
-                .new_object(
-                    "android/content/Intent",
-                    "(Ljava/lang/String;)V",
-                    &[JValue::Object(&action_obj)],
-                )
-                .map_err(|e| e.to_string())?;
+            let action = env.new_string("android.settings.APPLICATION_DETAILS_SETTINGS")?;
+            let intent = env.new_object(
+                jni_str!("android/content/Intent"),
+                jni_sig!("(Ljava/lang/String;)V"),
+                &[JValue::Object(&action)],
+            )?;
 
-            let package_uri_value = env
-                .new_string(format!("package:{package_name}"))
-                .map_err(|e| e.to_string())?;
-            let package_uri_obj = JObject::from(package_uri_value);
-            let uri_class = env
-                .find_class("android/net/Uri")
-                .map_err(|e| e.to_string())?;
+            let package_uri_value = env.new_string(format!("package:{package_name}"))?;
             let uri = env
                 .call_static_method(
-                    uri_class,
-                    "parse",
-                    "(Ljava/lang/String;)Landroid/net/Uri;",
-                    &[JValue::Object(&package_uri_obj)],
-                )
-                .map_err(|e| e.to_string())?
-                .l()
-                .map_err(|e| e.to_string())?;
+                    jni_str!("android/net/Uri"),
+                    jni_str!("parse"),
+                    jni_sig!("(Ljava/lang/String;)Landroid/net/Uri;"),
+                    &[JValue::Object(&package_uri_value)],
+                )?
+                .l()?;
 
             env.call_method(
                 &intent,
-                "setData",
-                "(Landroid/net/Uri;)Landroid/content/Intent;",
+                jni_str!("setData"),
+                jni_sig!("(Landroid/net/Uri;)Landroid/content/Intent;"),
                 &[JValue::Object(&uri)],
-            )
-            .map_err(|e| e.to_string())?;
+            )?;
 
             env.call_method(
                 activity,
-                "startActivity",
-                "(Landroid/content/Intent;)V",
+                jni_str!("startActivity"),
+                jni_sig!("(Landroid/content/Intent;)V"),
                 &[JValue::Object(&intent)],
-            )
-            .map_err(|e| e.to_string())?;
+            )?;
 
             Ok(())
         })
     }
 
     #[no_mangle]
-    pub extern "system" fn Java_com_rokucontroller_remote_MediaSessionManager_nativeSendRokuCommand(
-        mut env: JNIEnv<'_>,
-        _class: JClass<'_>,
-        ip: JString<'_>,
+    pub extern "system" fn Java_com_rokucontroller_remote_MediaSessionManager_nativeSendRokuCommand<
+        'caller,
+    >(
+        mut unowned_env: EnvUnowned<'caller>,
+        _class: JClass<'caller>,
+        ip: JString<'caller>,
         port: jint,
-        command: JString<'_>,
+        command: JString<'caller>,
     ) -> jboolean {
-        let ip = match jstring_to_rust_string(&mut env, ip) {
-            Ok(value) => value,
-            Err(_) => return JNI_FALSE,
-        };
+        unowned_env
+            .with_env(|env| -> jni::errors::Result<jboolean> {
+                let ip = ip.try_to_string(env)?;
+                let command = command.try_to_string(env)?;
 
-        let command = match jstring_to_rust_string(&mut env, command) {
-            Ok(value) => value,
-            Err(_) => return JNI_FALSE,
-        };
+                let send_result = tauri::async_runtime::block_on(send_roku_command_impl(
+                    ip,
+                    port as u16,
+                    command,
+                ));
 
-        let send_result =
-            tauri::async_runtime::block_on(send_roku_command_impl(ip, port as u16, command));
-
-        if send_result.is_ok() {
-            JNI_TRUE
-        } else {
-            JNI_FALSE
-        }
+                Ok(send_result.is_ok())
+            })
+            .resolve::<LogErrorAndDefault>()
     }
 
     #[no_mangle]
-    pub extern "system" fn Java_com_rokucontroller_remote_MediaSessionManager_nativeGetAppIconDataUrl(
-        mut env: JNIEnv<'_>,
-        _class: JClass<'_>,
-        ip: JString<'_>,
+    pub extern "system" fn Java_com_rokucontroller_remote_MediaSessionManager_nativeGetAppIconDataUrl<
+        'caller,
+    >(
+        mut unowned_env: EnvUnowned<'caller>,
+        _class: JClass<'caller>,
+        ip: JString<'caller>,
         port: jint,
-        app_id: JString<'_>,
-    ) -> jstring {
-        let ip = match jstring_to_rust_string(&mut env, ip) {
-            Ok(value) => value,
-            Err(_) => return std::ptr::null_mut(),
-        };
+        app_id: JString<'caller>,
+    ) -> JString<'caller> {
+        unowned_env
+            .with_env(|env| -> jni::errors::Result<JString<'caller>> {
+                let ip = ip.try_to_string(env)?;
+                let app_id = app_id.try_to_string(env)?;
 
-        let app_id = match jstring_to_rust_string(&mut env, app_id) {
-            Ok(value) => value,
-            Err(_) => return std::ptr::null_mut(),
-        };
+                let data_url =
+                    tauri::async_runtime::block_on(get_app_icon_impl(ip, port as u16, app_id))
+                        .unwrap_or_default();
 
-        let data_url = tauri::async_runtime::block_on(get_app_icon_impl(ip, port as u16, app_id))
-            .unwrap_or_default();
-
-        match env.new_string(data_url) {
-            Ok(value) => value.into_raw(),
-            Err(_) => std::ptr::null_mut(),
-        }
+                env.new_string(data_url)
+            })
+            .resolve::<LogErrorAndDefault>()
     }
 }
 

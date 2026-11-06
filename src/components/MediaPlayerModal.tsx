@@ -13,7 +13,7 @@ import {
     Alert,
     IconButton,
     Divider,
-    GridLegacy as Grid,
+    Grid,
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import PlayIcon from '@mui/icons-material/PlayArrow';
@@ -135,7 +135,7 @@ const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({ open, onClose, devi
 
         if (!mediaInfo) {
             return (
-                <Typography color="text.secondary" sx={{ p: 2 }}>
+                <Typography color="textSecondary" sx={{ p: 2 }}>
                     No media player information available
                 </Typography>
             );
@@ -163,7 +163,7 @@ const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({ open, onClose, devi
                         />
                     )}
                     {mediaInfo.plugin && (
-                        <Typography variant="body2" color="text.secondary">
+                        <Typography variant="body2" color="textSecondary">
                             {mediaInfo.plugin.name}
                         </Typography>
                     )}
@@ -195,32 +195,32 @@ const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({ open, onClose, devi
                             Media Format
                         </Typography>
                         <Grid container spacing={1}>
-                            <Grid item xs={6}>
-                                <Typography variant="caption" color="text.secondary">
+                            <Grid size={6}>
+                                <Typography variant="caption" color="textSecondary">
                                     Video:
                                 </Typography>
                                 <Typography variant="body2">
                                     {mediaInfo.format.video} ({mediaInfo.format.video_res})
                                 </Typography>
                             </Grid>
-                            <Grid item xs={6}>
-                                <Typography variant="caption" color="text.secondary">
+                            <Grid size={6}>
+                                <Typography variant="caption" color="textSecondary">
                                     Audio:
                                 </Typography>
                                 <Typography variant="body2">
                                     {mediaInfo.format.audio}
                                 </Typography>
                             </Grid>
-                            <Grid item xs={6}>
-                                <Typography variant="caption" color="text.secondary">
+                            <Grid size={6}>
+                                <Typography variant="caption" color="textSecondary">
                                     Container:
                                 </Typography>
                                 <Typography variant="body2">
                                     {mediaInfo.format.container}
                                 </Typography>
                             </Grid>
-                            <Grid item xs={6}>
-                                <Typography variant="caption" color="text.secondary">
+                            <Grid size={6}>
+                                <Typography variant="caption" color="textSecondary">
                                     Captions:
                                 </Typography>
                                 <Typography variant="body2">
@@ -228,8 +228,8 @@ const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({ open, onClose, devi
                                 </Typography>
                             </Grid>
                             {mediaInfo.format.drm !== 'none' && (
-                                <Grid item xs={12}>
-                                    <Typography variant="caption" color="text.secondary">
+                                <Grid size={12}>
+                                    <Typography variant="caption" color="textSecondary">
                                         DRM:
                                     </Typography>
                                     <Typography variant="body2">
@@ -247,16 +247,16 @@ const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({ open, onClose, devi
                             Plugin Details
                         </Typography>
                         <Grid container spacing={1}>
-                            <Grid item xs={6}>
-                                <Typography variant="caption" color="text.secondary">
+                            <Grid size={6}>
+                                <Typography variant="caption" color="textSecondary">
                                     ID:
                                 </Typography>
                                 <Typography variant="body2">
                                     {mediaInfo.plugin.id}
                                 </Typography>
                             </Grid>
-                            <Grid item xs={6}>
-                                <Typography variant="caption" color="text.secondary">
+                            <Grid size={6}>
+                                <Typography variant="caption" color="textSecondary">
                                     Bandwidth:
                                 </Typography>
                                 <Typography variant="body2">
@@ -276,9 +276,11 @@ const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({ open, onClose, devi
             onClose={onClose}
             maxWidth="sm"
             fullWidth
-            PaperProps={{
-                sx: {
-                    borderRadius: 2,
+            slotProps={{
+                paper: {
+                    sx: {
+                        borderRadius: 2,
+                    }
                 }
             }}
         >
@@ -293,7 +295,7 @@ const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({ open, onClose, devi
                         <CloseIcon />
                     </IconButton>
                 </Box>
-                <Typography variant="caption" color="text.secondary">
+                <Typography variant="caption" color="textSecondary">
                     {device.name} ({device.ip})
                 </Typography>
             </DialogTitle>
