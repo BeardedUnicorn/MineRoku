@@ -25,6 +25,7 @@ import './App.css';
 import { useAppStore, type RokuDevice } from './store';
 import { useShallow } from 'zustand/react/shallow';
 import { usePlatform } from './hooks/usePlatform';
+import { dismissSplash } from './splash';
 import {
   checkDeviceConnectivity,
   discoverRokuDevices,
@@ -111,6 +112,8 @@ const App: React.FC = () => {
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const prefersReducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
   const currentPlatform = usePlatform();
+
+  useEffect(dismissSplash, []);
 
   useEffect(() => {
     setIsSidebarOpen(!isMobile);

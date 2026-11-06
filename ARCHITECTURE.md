@@ -40,6 +40,8 @@ This document is the map. The [README](README.md) covers what the app *does*; th
 
 Entry path: [src/main.tsx](src/main.tsx) mounts [src/App.tsx](src/App.tsx), which owns the responsive layout (sidebar + main pane + mobile bottom nav), the discovery lifecycle (event listeners + initial scan), and the 10-second connectivity poll.
 
+**Startup.** Native window colors (`backgroundColor` in `tauri.conf.json`, `windowBackground` in the Android theme) are dark so launch doesn't flash white. [index.html](index.html) then inlines the first-paint CSS and the `#app-splash` loading screen, because `src/*.css` only arrives with the JS bundle. A small inline script reads the saved `remoteStyle` to choose the splash accent; those colors mirror `remoteStyleTokens.ts`, and a test fails if they drift. `App` calls `dismissSplash` ([src/splash.ts](src/splash.ts)) on mount to fade it out over the real UI.
+
 **State.** A single Zustand store at [src/store.ts](src/store.ts) (`useAppStore`) with `persist` middleware writes to `localStorage`. Persisted slices: `devices`, `selectedDevice`, `favoriteApps`, `preferences` (remote style + last-used). Devices are keyed by `hardware_id`; the store includes a migration that rewrites legacy IP-keyed entries.
 
 **Components** ([src/components/](src/components/)):
@@ -96,7 +98,7 @@ Files:
 ## Native crates (`crates/`)
 
 - [crates/roku/](crates/roku/) — vendored fork of Carlo Abelli's `roku` crate. Provides the typed ECP `Device` (apps, active_app, media_player, keypress/down/up, launch, device_info, input, search) and serde-xml-rs models. All HTTP to Roku boxes funnels through this crate; backend code that builds raw URLs itself is the exception, not the rule.
-- [crates/ssdp-client/](crates/ssdp-client/) — vendored copy of upstream `ssdp-client` v2.1.0 with Android patches in [src/search.rs](crates/ssdp-client/src/search.rs): it finds the WiFi interface address and binds the socket to `wlan0` so discovery works with a VPN active. Both `src-tauri` and `roku` use this copy through `[patch.crates-io]` in [src-tauri/Cargo.toml](src-tauri/Cargo.toml). The discovery logic that calls it is in [src-tauri/src/commands.rs](src-tauri/src/commands.rs) (`discover_roku_devices_impl`) and [src-tauri/src/background_discovery.rs](src-tauri/src/background_discovery.rs).
+- [crates/ssdp-client/](crates/ssdp-client/) — vendored fork of [`jakobhellermann/ssdp-client`](https://github.com/jakobhellermann/ssdp-client) v2.1.0 (upstream commit `f143d09`). App discovery runs through it: `discover_roku_devices_impl` in [src-tauri/src/commands.rs](src-tauri/src/commands.rs) calls `run_discovery_once` in [src-tauri/src/background_discovery.rs](src-tauri/src/background_discovery.rs), which calls `ssdp_client::search`. The local changes in [src/search.rs](crates/ssdp-client/src/search.rs) make discovery work on Android (bind to `wlan0` to bypass VPNs, join multicast on the WiFi interface) and send M-SEARCH several times on every platform. Both `src-tauri` and `roku` use this copy through `[patch.crates-io]` in [src-tauri/Cargo.toml](src-tauri/Cargo.toml). `git show ef85274 -- crates/ssdp-client` shows the exact difference from upstream.
 
 ## Persistence: SQLite
 
@@ -177,6 +179,6 @@ Android:
 - **One backend call site per behavior.** Logic goes in `commands.rs` as `xxx_impl`; the `#[command]` wrapper in `lib.rs` does platform glue only. Both Tauri IPC and JNI depend on this.
 - **Mock Tauri in the setup file.** Per-test mocks of `invoke`/`listen` drift apart — extend [src/setupTests.ts](src/setupTests.ts) instead.
 - **Gate Android-only Rust with `#[cfg(target_os = "android")]`** and provide a desktop fallback in the same file (see how `update_media_notification` is defined twice in [lib.rs](src-tauri/src/lib.rs)). The `generate_handler!` list must compile on every target.
-- **`crates/ssdp-client/` is patched, not stock.** Replacing it with the crates.io release removes the Android `wlan0`/VPN handling. To upgrade it, re-apply those changes to the new upstream version.
+- **`crates/ssdp-client/` is patched, not stock.** Replacing it with the crates.io release removes the Android `wlan0`/VPN handling. To upgrade it, re-apply those changes to the new upstream version. Run its tests from `crates/ssdp-client/`, because Cargo won't test it with `-p` from outside its own package.
 - **Zustand selectors must return stable values.** A selector that builds a new object or array on each call causes an infinite render loop. Wrap object selectors in `useShallow`, and use a shared constant for empty fallbacks rather than `|| []`.
 - **Use `color="textSecondary"` on `Typography`, not `color="text.secondary"`.** MUI 9 removed system props, and the dotted form still type-checks because `color` is also an HTML attribute, but it no longer applies any color. In `sx`, `color: 'text.secondary'` still works.

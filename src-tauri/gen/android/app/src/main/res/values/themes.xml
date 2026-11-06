@@ -1,7 +1,10 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
     <!-- Base application theme. -->
     <style name="Theme.roku_controller" parent="Theme.MaterialComponents.DayNight.NoActionBar">
-        <!-- Shows behind the system bars, so it has to match the app's dark background. -->
+        <!-- Shows behind the system bars, so it has to match the app's dark background.
+             Also keeps launch dark in light mode; the web splash takes over from here. -->
         <item name="android:windowBackground">@color/app_background</item>
+        <item name="android:statusBarColor">@color/app_background</item>
+        <item name="android:navigationBarColor">@color/app_background</item>
     </style>
 </resources>

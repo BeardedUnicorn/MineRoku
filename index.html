@@ -4,13 +4,269 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
     <meta name="theme-color" content="#121212" />
     <title>Roku Remote</title>
+    <script>
+      // Pick the splash accent from the saved remote style (see src/store.ts).
+      // Anything missing or unknown matches no selector and stays on classic.
+      try {
+        document.documentElement.dataset.remoteStyle = JSON.parse(
+          localStorage.getItem('roku-remote-storage')
+        ).state.remoteStyle;
+      } catch (error) {}
+    </script>
+    <!-- Inline on purpose: everything here must apply before the JS bundle and its CSS load. -->
+    <style>
+      /* Accents mirror centerButtonBackground in src/components/remoteStyleTokens.ts. */
+      :root,
+      :root[data-remote-style='classic'] {
+        --splash-accent: #8e65cf;
+        --splash-accent-deep: #673ab7;
+        --splash-glow: rgba(142, 101, 207, 0.34);
+      }
+
+      :root[data-remote-style='studio'] {
+        --splash-accent: #7d5cd8;
+        --splash-accent-deep: #5e41b6;
+        --splash-glow: rgba(125, 92, 216, 0.34);
+      }
+
+      :root[data-remote-style='glass'] {
+        --splash-accent: #9982ff;
+        --splash-accent-deep: #6d52d8;
+        --splash-glow: rgba(153, 130, 255, 0.36);
+      }
+
+      :root[data-remote-style='highContrast'] {
+        --splash-accent: #ffffff;
+        --splash-accent-deep: #d8d8d8;
+        --splash-glow: transparent;
+      }
+
+      html {
+        color-scheme: dark;
+        background: #121212;
+      }
+
+      body {
+        margin: 0;
+        background: #121212;
+      }
+
+      .skip-link {
+        position: absolute;
+        left: 16px;
+        top: -48px;
+        z-index: 1400;
+        padding: 8px 12px;
+        border-radius: 8px;
+        background: #ffffff;
+        color: #121212;
+        text-decoration: none;
+        font-weight: 600;
+        transition: top 0.2s ease;
+      }
+
+      .skip-link:focus-visible {
+        top: 16px;
+      }
+
+      /* Above MUI's modal layer (1300), below the skip link (1400). */
+      #app-splash {
+        position: fixed;
+        inset: 0;
+        z-index: 1350;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+        background: #121212;
+      }
+
+      #app-splash[data-state='leaving'] {
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 240ms ease;
+      }
+
+      .splash-content {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 28px;
+        animation: splash-enter 320ms ease-out both;
+      }
+
+      .splash-mark {
+        position: relative;
+        width: clamp(104px, 24vmin, 148px);
+      }
+
+      .splash-mark::before {
+        content: '';
+        position: absolute;
+        inset: -55%;
+        border-radius: 50%;
+        background: radial-gradient(closest-side, var(--splash-glow), transparent 75%);
+        filter: blur(18px);
+        animation: splash-breathe 2.6s ease-in-out infinite;
+      }
+
+      .splash-mark svg {
+        position: relative;
+        display: block;
+        width: 100%;
+        height: auto;
+      }
+
+      .splash-line {
+        fill: none;
+        stroke: var(--splash-accent);
+        stroke-width: 28;
+        stroke-linecap: round;
+      }
+
+      .splash-arc {
+        animation: splash-signal 1.8s ease-in-out infinite both;
+      }
+
+      .splash-arc-outer {
+        animation-delay: 0.28s;
+      }
+
+      .splash-cutout {
+        fill: none;
+        stroke: #121212;
+        stroke-width: 20;
+      }
+
+      .splash-wordmark {
+        position: relative;
+        color: #ffffff;
+        font-family: 'Roboto', 'Helvetica', 'Arial', sans-serif;
+        font-size: 20px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+      }
+
+      .splash-progress {
+        position: relative;
+        width: 120px;
+        height: 3px;
+        margin-top: -10px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.1);
+      }
+
+      .splash-progress::after {
+        content: '';
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        width: 40%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, var(--splash-accent-deep), var(--splash-accent));
+        animation: splash-slide 1.3s ease-in-out infinite;
+      }
+
+      @keyframes splash-enter {
+        from {
+          opacity: 0;
+          transform: translateY(6px) scale(0.98);
+        }
+      }
+
+      @keyframes splash-breathe {
+        0%,
+        100% {
+          opacity: 0.6;
+          transform: scale(0.94);
+        }
+
+        50% {
+          opacity: 1;
+          transform: scale(1.04);
+        }
+      }
+
+      @keyframes splash-signal {
+        0%,
+        100% {
+          opacity: 0.25;
+        }
+
+        45% {
+          opacity: 1;
+        }
+      }
+
+      @keyframes splash-slide {
+        from {
+          transform: translateX(-100%);
+        }
+
+        to {
+          transform: translateX(250%);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .splash-content,
+        .splash-mark::before,
+        .splash-arc {
+          animation: none;
+        }
+
+        #app-splash[data-state='leaving'] {
+          transition: none;
+        }
+
+        .splash-progress {
+          display: none;
+        }
+      }
+    </style>
   </head>
 
   <body>
     <a class="skip-link" href="#main-content">Skip to main content</a>
     <div id="root"></div>
+    <div id="app-splash" role="status" aria-label="Loading Roku Remote">
+      <div class="splash-content">
+        <div class="splash-mark">
+          <svg viewBox="190 120 644 770" aria-hidden="true" focusable="false">
+            <defs>
+              <linearGradient id="splash-remote-fill" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" style="stop-color: var(--splash-accent)" />
+                <stop offset="1" style="stop-color: var(--splash-accent-deep)" />
+              </linearGradient>
+            </defs>
+            <path class="splash-line splash-arc splash-arc-outer" d="M348 192 Q512 104 676 192" />
+            <path class="splash-line splash-arc" d="M402 247 Q512 190 622 247" />
+            <path
+              class="splash-line"
+              d="M342 564 H244 a16 16 0 0 1 -16 -16 V318 a16 16 0 0 1 16 -16 H780 a16 16 0 0 1 16 16 V548 a16 16 0 0 1 -16 16 H682"
+            />
+            <rect x="385" y="376" width="254" height="498" rx="100" fill="url(#splash-remote-fill)" />
+            <rect x="482" y="426" width="60" height="24" rx="12" fill="#121212" />
+            <circle class="splash-cutout" cx="512" cy="589" r="92" />
+            <path class="splash-cutout" d="M512 497 V681 M420 589 H604" />
+            <path
+              d="M512 728 L556 768 H544 V812 H480 V768 H468 Z"
+              fill="#121212"
+              stroke="#121212"
+              stroke-width="8"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </div>
+        <div class="splash-wordmark" aria-hidden="true">Roku Remote</div>
+        <div class="splash-progress" aria-hidden="true"></div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

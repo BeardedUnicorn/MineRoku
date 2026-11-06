@@ -24,7 +24,9 @@
         "width": 1000,
         "height": 750,
         "decorations": true,
-        "center": true
+        "center": true,
+        "backgroundColor": "#121212",
+        "theme": "Dark"
       }
     ],
     "security": {
