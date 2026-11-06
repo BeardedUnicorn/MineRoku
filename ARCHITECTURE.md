@@ -40,6 +40,8 @@ This document is the map. The [README](README.md) covers what the app *does*; th
 
 Entry path: [src/main.tsx](src/main.tsx) mounts [src/App.tsx](src/App.tsx), which owns the responsive layout (sidebar + main pane + mobile bottom nav), the discovery lifecycle (event listeners + initial scan), and the 10-second connectivity poll.
 
+**Startup.** Native window colors (`backgroundColor` in `tauri.conf.json`, `windowBackground` in the Android theme) are dark so launch doesn't flash white. [index.html](index.html) then inlines the first-paint CSS and the `#app-splash` loading screen, because `src/*.css` only arrives with the JS bundle. A small inline script reads the saved `remoteStyle` to choose the splash accent; those colors mirror `remoteStyleTokens.ts`, and a test fails if they drift. `App` calls `dismissSplash` ([src/splash.ts](src/splash.ts)) on mount to fade it out over the real UI.
+
 **State.** A single Zustand store at [src/store.ts](src/store.ts) (`useAppStore`) with `persist` middleware writes to `localStorage`. Persisted slices: `devices`, `selectedDevice`, `favoriteApps`, `preferences` (remote style + last-used). Devices are keyed by `hardware_id`; the store includes a migration that rewrites legacy IP-keyed entries.
 
 **Components** ([src/components/](src/components/)):
