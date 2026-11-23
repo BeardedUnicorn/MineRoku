@@ -13,7 +13,7 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import SettingsIcon from '@mui/icons-material/Settings';
 import InfoIcon from '@mui/icons-material/Info';
 import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
-import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined';
 import { usePlatform } from '../hooks/usePlatform';
 import { useBackHandler } from '../hooks/useBackHandler';
 import { clearAllData, forgetDevice, hideMediaNotification, restartApp } from '../services/rokuClient';
