@@ -113,6 +113,8 @@ const App: React.FC = () => {
   const [mobileView, setMobileView] = useState<'remote' | 'apps'>('remote');
   const [isScanning, setIsScanning] = useState(false);
   const [scanStatus, setScanStatus] = useState('');
+  const [scanFailed, setScanFailed] = useState(false);
+  const [hasScanned, setHasScanned] = useState(false);
   const scanPromiseRef = useRef<Promise<void> | null>(null);
 
   const theme = useTheme();
@@ -243,12 +245,14 @@ const App: React.FC = () => {
     const scanPromise = (async () => {
       setIsScanning(true);
       setIsSearching(true);
+      setScanFailed(false);
 
       try {
         if (isAndroid) {
           setScanStatus('Checking permissions…');
           const hasPermissions = await ensureAndroidDiscoveryPermissions();
           if (!hasPermissions) {
+            setScanFailed(true);
             setScanStatus(
               'Permission is required to find Roku devices on your network. Allow nearby devices (local network) access, then scan again.'
             );
@@ -258,6 +262,7 @@ const App: React.FC = () => {
         }
 
         setScanStatus('Scanning network…');
+        setHasScanned(true);
         const foundDevices = await discoverRokuDevices();
         const devicesWithStatus: RokuDevice[] = foundDevices.map((device) => ({
           ...device,
@@ -289,6 +294,7 @@ const App: React.FC = () => {
         }
       } catch (error) {
         console.error('Discovery error:', error);
+        setScanFailed(true);
         setScanStatus(`Scan failed: ${String(error)}`);
       } finally {
         setIsScanning(false);
@@ -339,7 +345,6 @@ const App: React.FC = () => {
       // Not known yet. Android must never scan on its own, so wait rather than guess.
     } else if (isAndroid) {
       setIsSearching(false);
-      setScanStatus((status) => status || 'Tap refresh to scan for Roku devices.');
     } else {
       void scanForDevices();
     }
@@ -508,7 +513,9 @@ const App: React.FC = () => {
 
     if (!hasAnyDevices) {
       const discoveryPermissionBlocked =
-        currentPlatform === 'android' && scanStatus.toLowerCase().includes('permission');
+        isAndroid && scanFailed && scanStatus.toLowerCase().includes('permission');
+      // Android never scans on its own, so the first visit is an invitation, not a failure.
+      const neverScanned = isAndroid && !hasScanned;
       return (
         <Paper
           sx={{
@@ -521,40 +528,41 @@ const App: React.FC = () => {
           }}
         >
           <SearchOffIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
-          <Typography variant="h6" color="textSecondary">
-            No Roku Devices Found
+          <Typography variant="h6" component="h2" color="textSecondary">
+            {neverScanned ? 'Find your Roku' : 'No Roku Devices Found'}
           </Typography>
           <Typography variant="body1" color="textSecondary" sx={{ mt: 1 }}>
-            Please ensure your Roku is powered on and connected to the same WiFi network. Tap
-            refresh to scan again.
+            {neverScanned
+              ? 'Make sure your Roku is powered on and on the same Wi-Fi network as this device, then scan.'
+              : 'Please ensure your Roku is powered on and connected to the same WiFi network, then scan again.'}
           </Typography>
-          {scanStatus && (
-            <Typography variant="body2" color="error" sx={{ mt: 1 }} aria-live="polite">
+          {scanFailed && scanStatus && (
+            <Typography variant="body2" color="error" sx={{ mt: 1 }} role="alert">
               {scanStatus}
             </Typography>
           )}
-          <Button
-            variant="contained"
-            startIcon={isScanning ? <CircularProgress size={16} color="inherit" /> : <RefreshIcon />}
-            sx={{ mt: 2 }}
-            onClick={() => void scanForDevices()}
-            disabled={isScanning}
-          >
-            {isScanning ? 'Scanning…' : 'Refresh'}
-          </Button>
-          {discoveryPermissionBlocked && (
+          <Box sx={{ mt: 2, display: 'flex', flexWrap: 'wrap', gap: 1.5, justifyContent: 'center' }}>
             <Button
-              variant="outlined"
-              sx={{ mt: 1.5 }}
-              onClick={() => {
-                void openAndroidAppSettings().catch((error) => {
-                  console.error('Failed to open Android app settings:', error);
-                });
-              }}
+              variant="contained"
+              startIcon={isScanning ? <CircularProgress size={16} color="inherit" /> : <RefreshIcon />}
+              onClick={() => void scanForDevices()}
+              disabled={isScanning}
             >
-              Open Settings
+              {isScanning ? 'Scanning…' : neverScanned ? 'Scan for devices' : 'Refresh'}
             </Button>
-          )}
+            {discoveryPermissionBlocked && (
+              <Button
+                variant="outlined"
+                onClick={() => {
+                  void openAndroidAppSettings().catch((error) => {
+                    console.error('Failed to open Android app settings:', error);
+                  });
+                }}
+              >
+                Open Settings
+              </Button>
+            )}
+          </Box>
         </Paper>
       );
     }
@@ -589,9 +597,11 @@ const App: React.FC = () => {
     requestNetworkAccess,
     isSearching,
     scanStatus,
+    scanFailed,
+    hasScanned,
+    isAndroid,
     isScanning,
     scanForDevices,
-    currentPlatform,
   ]);
 
   return (

@@ -66,6 +66,8 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.mocked(platform).mockImplementation(() => Promise.resolve('linux') as never);
+  resetPlatformForTests();
 });
 
 describe('App on desktop', () => {
@@ -99,7 +101,8 @@ describe('App on Android', () => {
     mockInvoke();
     renderWithTheme(<App />);
 
-    expect(await screen.findByText(/tap refresh to scan for roku devices/i)).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /scan for devices/i })).toBeInTheDocument();
+    expect(screen.queryByText(/no roku devices found/i)).not.toBeInTheDocument();
     expect(calledCommands()).not.toContain('discover_roku_devices');
   });
 
@@ -139,12 +142,12 @@ describe('App on Android', () => {
     });
     renderWithTheme(<App />);
 
-    await userEvent.click(await screen.findByRole('button', { name: /^refresh$/i }));
+    await userEvent.click(await screen.findByRole('button', { name: /scan for devices/i }));
 
     expect(
       await screen.findByText(/scan failed: android activity is not available/i)
     ).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /^refresh$/i })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /scan for devices/i })).toBeEnabled();
     expect(calledCommands()).not.toContain('discover_roku_devices');
   });
 
@@ -152,7 +155,7 @@ describe('App on Android', () => {
     mockInvoke({ ensure_android_discovery_permissions: () => false });
     renderWithTheme(<App />);
 
-    await userEvent.click(await screen.findByRole('button', { name: /^refresh$/i }));
+    await userEvent.click(await screen.findByRole('button', { name: /scan for devices/i }));
 
     expect(await screen.findByText(/permission is required to find roku devices/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /open settings/i })).toBeInTheDocument();

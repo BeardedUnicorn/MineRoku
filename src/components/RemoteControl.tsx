@@ -465,16 +465,25 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
       }
     };
 
+    // Desktop pauses while another window has focus. A phone WebView reports no focus until the
+    // first touch, so requiring it there delayed the first poll and made the progress bar and
+    // active app appear under the user's first tap; on touch platforms only visibility counts.
+    const requireFocus = currentPlatform !== 'android' && currentPlatform !== 'ios';
+    const canPoll = () =>
+      document.visibilityState === 'visible' && (!requireFocus || document.hasFocus());
+
     const onFocus = () => {
       startPolling(true);
     };
 
     const onBlur = () => {
-      stopPolling();
+      if (requireFocus) {
+        stopPolling();
+      }
     };
 
     const onVisibilityChange = () => {
-      if (document.visibilityState === 'visible' && document.hasFocus()) {
+      if (canPoll()) {
         startPolling(true);
         setResumeCount((count) => count + 1);
       } else {
@@ -486,8 +495,9 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
     window.addEventListener('blur', onBlur);
     document.addEventListener('visibilitychange', onVisibilityChange);
 
-    if (document.visibilityState === 'visible' && document.hasFocus()) {
-      startPolling(false);
+    if (canPoll()) {
+      // Fetch straight away: media state only arrives through this poll.
+      startPolling(true);
     }
 
     return () => {
@@ -496,7 +506,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
       window.removeEventListener('blur', onBlur);
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
-  }, [device.hardware_id, device.ip, device.port]);
+  }, [device.hardware_id, device.ip, device.port, currentPlatform]);
 
   // Commands go out one at a time, in the order pressed. Rapid presses (scrolling a list on the
   // TV) queue up instead of being dropped; a failure discards whatever is still waiting so a

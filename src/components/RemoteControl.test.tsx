@@ -5,6 +5,8 @@ import { renderWithTheme } from '../testUtils';
 import RemoteControl from './RemoteControl';
 import { RokuDevice, useAppStore } from '../store';
 import { invoke } from '@tauri-apps/api/core';
+import { platform } from '@tauri-apps/plugin-os';
+import { resetPlatformForTests } from '../hooks/usePlatform';
 
 const device: RokuDevice = {
   name: 'TV',
@@ -193,6 +195,38 @@ describe('RemoteControl', () => {
       expect(notice).toHaveTextContent(/device offline/i);
       expect(screen.queryByText('Roku Remote')).not.toBeInTheDocument();
     });
+  });
+
+  it('starts polling without window focus on Android', async () => {
+    // A phone WebView has no focus until the first touch. Waiting for it made the progress bar
+    // appear under the user's first tap.
+    vi.mocked(platform).mockReturnValue('android' as ReturnType<typeof platform>);
+    resetPlatformForTests();
+    const hasFocus = vi.spyOn(document, 'hasFocus').mockReturnValue(false);
+    try {
+      vi.mocked(invoke).mockImplementation((cmd: string) => {
+        if (cmd === 'get_active_app') return Promise.resolve({ name: 'Netflix', id: '12' });
+        if (cmd === 'get_media_player') {
+          return Promise.resolve({
+            state: 'play',
+            error: false,
+            position: '30000 ms',
+            duration: '120000 ms',
+            is_live: false,
+          });
+        }
+        return Promise.resolve(true);
+      });
+      renderWithTheme(<RemoteControl device={device} />);
+
+      await waitFor(() => {
+        expect(getComputedStyle(screen.getByTestId('remote-progress')).visibility).toBe('visible');
+      });
+    } finally {
+      hasFocus.mockRestore();
+      vi.mocked(platform).mockImplementation(() => Promise.resolve('linux') as never);
+      resetPlatformForTests();
+    }
   });
 
   it('delivers every press of a repeated button, in order', async () => {

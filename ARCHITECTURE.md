@@ -120,22 +120,26 @@ icons  (device_ip TEXT, app_id TEXT, icon_data TEXT, cached_at,
 1. SSDP M-SEARCH with the custom search target `roku:ecp`. Timing differs by platform — desktop uses ~5s total / MX=2, Android uses ~10s total / MX=4 because multicast locks cost more.
 2. For each LOCATION header, fetch `/query/device-info` and derive the `hardware_id`.
 3. Dedupe responses within a 60s last-seen window. New device → emit `device_discovered`. No response for 60s → emit `device_lost`.
-4. If SSDP returns nothing (common on networks that block multicast), fall back to `scan_network_for_roku` which sweeps the local /24 with HTTP probes.
+4. If SSDP returns nothing or cannot start (common on networks that block multicast), fall back to `scan_network_for_roku` which sweeps the local /24 with HTTP probes. Devices found this way are announced and persisted exactly like SSDP results.
 5. Persist seen devices to SQLite so cold launches show the last-known list immediately while a fresh scan runs.
 
 ## Android platform layer
 
 Kotlin sources live under [src-tauri/gen/android/app/src/main/java/com/rokucontroller/remote/](src-tauri/gen/android/app/src/main/java/com/rokucontroller/remote/):
 
-- `MainActivity.kt` — Tauri webview host; also exposes `ensureDiscoveryPermissions()` and friends that Rust calls back into.
-- `MediaSessionManager.kt` — Android 13+ media controls on the lock screen and notification shade. Holds a `MediaSessionCompat`, dispatches transport callbacks (play/pause/forward/rewind/volume) into Rust via JNI, and caches app icons in a `ConcurrentHashMap`.
-- `MediaControlService.kt` / `MediaControlReceiver.kt` — foreground service + broadcast receiver that keep the media session alive and route Intent actions.
+- `MainActivity.kt` — Tauri webview host; also exposes the permission, notification, haptic and multicast-lock methods that Rust calls back into. Every one of them catches its own exceptions and hops to the UI thread where needed, because Rust calls them from non-UI threads.
+- `MediaSessionManager.kt` — media controls on the lock screen and notification shade. A process-wide singleton holding a `MediaSessionCompat`; `show(...)` posts the notification and `hide()` removes it. State is confined to the main thread; only the native calls run on IO.
+- `MediaControlReceiver.kt` — broadcast receiver for the notification's buttons. Sends the key straight through the native bridge, so it works in a process that has no activity.
+- `TaskWatcherService.kt` — bound-only service whose single job is `onTaskRemoved`: remove the notification when the app is swiped away.
+
+**No foreground service.** The media notification is a plain `MediaStyle` notification. It used to be backed by a `START_STICKY` `mediaPlayback` foreground service that was never stopped; after the process died in the background the system restarted it with no activity and it called `startForeground`, which Android rejects. The notification is now shown only while the activity is visible and removed on device switch, forget, Delete All Data, task removal and exit. The trade-off: once Android freezes or kills the backgrounded app the lock-screen controls can go stale or disappear. Do not reintroduce a sticky or media-typed foreground service to "fix" that.
 
 **JNI bridge** (defined in [lib.rs](src-tauri/src/lib.rs)):
 
 - `Java_…_MediaSessionManager_nativeSendRokuCommand` → `send_roku_command_impl`
 - `Java_…_MediaSessionManager_nativeGetAppIconDataUrl` → `get_app_icon_impl`
 - `Java_…_MainActivity_nativeOnActivityCreated` / `nativeOnActivityDestroyed` → keep the `CURRENT_ACTIVITY` reference that `with_activity` uses
+- `Java_…_MainActivity_nativeOnPermissionResult` → wakes the command that is awaiting the user's answer to a permission dialog
 
 This is *why* the `_impl`/wrapper split exists — both Tauri commands and Kotlin transport controls call the same underlying functions.
 
@@ -143,9 +147,15 @@ This is *why* the `_impl`/wrapper split exists — both Tauri commands and Kotli
 
 **Edge-to-edge.** Android draws behind the system bars for targetSdk 35+, so `MainActivity.keepContentClearOfSystemBars` pads the WebView's container for the status bar, navigation bar, display cutout, and keyboard. Because it consumes those insets, CSS `env(safe-area-inset-*)` resolves to 0 in the WebView.
 
-**Permissions.** Discovery needs nearby-devices / location; notifications need `POST_NOTIFICATIONS`; SSDP needs a held WiFi multicast lock for the duration of the scan. The Rust wrappers acquire and release these around `discover_roku_devices_impl` (see [lib.rs:248-276](src-tauri/src/lib.rs:248)).
+**Permissions.** The app targets Android 17 (API 37), where *all* LAN traffic — SSDP, the subnet sweep and every ECP request, native sockets included — needs the runtime permission `ACCESS_LOCAL_NETWORK`. Without it requests time out rather than fail fast, so the frontend asks for it (`ensure_android_local_network_access`) as soon as a saved device exists and mounts nothing that polls a device until it is granted. On Android 13–16 discovery asks for nearby-devices / location instead. Notifications need `POST_NOTIFICATIONS`. The `ensure_*` commands are async and resolve with the user's actual answer. SSDP needs a held WiFi multicast lock for the duration of the scan; the Rust wrapper acquires and releases it around `discover_roku_devices_impl`.
 
-**Background discovery is gated off at startup on Android** — it only runs when the user triggers a scan. Desktop spawns the periodic loop in the `setup` hook. This is intentional: continuous SSDP on a phone burns battery and conflicts with OS lifecycle management.
+**Process exit.** When the activity is destroyed (the app is swiped out of Recents) Tauri ends the process. `run()` handles `RunEvent::Exit` by calling `_exit` instead of letting `std::process::exit` run static destructors: those ran while Tokio and WebView threads were still alive, which intermittently aborted the already-backgrounded app with "pthread_mutex_lock called on a destroyed mutex".
+
+**Logging.** `android::init_logging()` runs at the top of `run()` and routes Rust `log` output and panics (with backtrace) to logcat under the tag `RokuRust`. The binary's `main()` is never executed on Android, so logging must not be set up there. `MainActivity` also logs the previous process exit reasons on start, which is how to tell a crash from a low-memory kill.
+
+**Background discovery is gated off at startup on Android** — it only runs when the user triggers a scan. Desktop runs one discovery cycle from the `setup` hook; there is no periodic loop on any platform.
+
+**Forgetting a device.** `forget_device` deletes the device's SQLite row plus the app and icon caches stored under its IP, and the frontend removes it from the persisted store. Both are needed because each side re-seeds the other on launch. There is no blocklist: a later scan that finds the device lists it again.
 
 ## Build, test, CI
 

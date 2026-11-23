@@ -48,6 +48,11 @@ mod android {
     /// Routes Rust `log` output to logcat and makes panics visible there. The binary's `main` is
     /// never run on Android, so this has to happen in the library entry point.
     pub(super) fn init_logging() {
+        static INIT: std::sync::Once = std::sync::Once::new();
+        INIT.call_once(init_logging_once);
+    }
+
+    fn init_logging_once() {
         let level = if cfg!(debug_assertions) {
             log::LevelFilter::Debug
         } else {
@@ -279,6 +284,21 @@ mod android {
         })
     }
 
+    /// Ends the process without running C/C++ exit handlers.
+    ///
+    /// When the activity is destroyed (for example the app is swiped out of Recents) Tauri calls
+    /// `std::process::exit`, which runs static destructors while Tokio workers and WebView
+    /// threads are still alive. Those threads then lock mutexes that were just destroyed and
+    /// bionic aborts ("pthread_mutex_lock called on a destroyed mutex"): an intermittent native
+    /// crash of an app that is already in the background. `_exit` skips those handlers.
+    pub(super) fn exit_process() -> ! {
+        extern "C" {
+            fn _exit(status: i32) -> !;
+        }
+        log::info!("Activity destroyed; exiting process");
+        unsafe { _exit(0) }
+    }
+
     pub(super) fn hide_media_notification() -> Result<(), String> {
         with_activity(|env, activity| {
             env.call_method(
@@ -352,6 +372,8 @@ mod android {
     ) -> jboolean {
         unowned_env
             .with_env(|env| -> jni::errors::Result<jboolean> {
+                // The notification's buttons can run this in a process where `run()` never did.
+                init_logging();
                 let ip = ip.try_to_string(env)?;
                 let command = command.try_to_string(env)?;
 
@@ -701,11 +723,12 @@ pub fn run() {
         Ok(app) => app.run(|_app, _event| {
             // Best effort: MainActivity also removes the notification when it finishes.
             #[cfg(target_os = "android")]
-            if matches!(
-                _event,
-                tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
-            ) {
-                let _ = android::hide_media_notification();
+            match _event {
+                tauri::RunEvent::ExitRequested { .. } => {
+                    let _ = android::hide_media_notification();
+                }
+                tauri::RunEvent::Exit => android::exit_process(),
+                _ => {}
             }
         }),
         Err(e) => log::error!("Failed to start the Tauri application: {e}"),
