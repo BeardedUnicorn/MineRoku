@@ -45,7 +45,9 @@ if [[ "$OS" == "Darwin" ]]; then
   export ANDROID_SDK_ROOT="$ANDROID_SDK"
   export PATH="$ANDROID_SDK/cmdline-tools/latest/bin:$ANDROID_SDK/platform-tools:$PATH"
   yes | sdkmanager --licenses >/dev/null
-  sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0" "ndk;26.1.10909125"
+  sdkmanager "platform-tools" "platforms;android-37.0" "build-tools;37.0.0" "ndk;28.2.13676358"
+  # Tauri builds the Rust library with this NDK (r28+ aligns to 16 KB pages by default).
+  export NDK_HOME="$ANDROID_SDK/ndk/28.2.13676358"
 
 elif [[ "$OS" =~ MINGW|MSYS|CYGWIN ]]; then
   # ----- Windows (Git Bash / MSYS2) -----
@@ -76,7 +78,9 @@ elif [[ "$OS" =~ MINGW|MSYS|CYGWIN ]]; then
   export ANDROID_SDK_ROOT="$ANDROID_SDK"
   export PATH="$ANDROID_SDK/cmdline-tools/latest/bin:$ANDROID_SDK/platform-tools:$PATH"
   yes | sdkmanager --licenses >/dev/null
-  sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0" "ndk;26.1.10909125"
+  sdkmanager "platform-tools" "platforms;android-37.0" "build-tools;37.0.0" "ndk;28.2.13676358"
+  # Tauri builds the Rust library with this NDK (r28+ aligns to 16 KB pages by default).
+  export NDK_HOME="$ANDROID_SDK/ndk/28.2.13676358"
 else
   echo "Unsupported OS: $OS"
   exit 1

@@ -31,11 +31,18 @@ pub struct Device {
 
 impl Device {
     pub fn new(url: Url) -> Device {
-        let client = Client::builder()
-            .timeout(Duration::from_secs(5))
-            .connect_timeout(Duration::from_secs(3))
-            .build()
-            .unwrap_or_else(|_| Client::new());
+        // One client (and connection pool) for the whole process: callers build a `Device` per
+        // request, and polling would otherwise open a new connection every time.
+        static SHARED_CLIENT: std::sync::OnceLock<Client> = std::sync::OnceLock::new();
+        let client = SHARED_CLIENT
+            .get_or_init(|| {
+                Client::builder()
+                    .timeout(Duration::from_secs(5))
+                    .connect_timeout(Duration::from_secs(3))
+                    .build()
+                    .unwrap_or_else(|_| Client::new())
+            })
+            .clone();
         Device { url, client }
     }
 
@@ -59,21 +66,21 @@ impl Device {
 
     pub async fn apps(&self) -> Result<Apps> {
         let url = self.url.join("query/apps")?;
-        let res = self.client.get(url).send().await?;
+        let res = self.client.get(url).send().await?.error_for_status()?;
         let text = res.text().await?;
         Ok(from_str(&text)?)
     }
 
     pub async fn active_app(&self) -> Result<ActiveApp> {
         let url = self.url.join("query/active-app")?;
-        let res = self.client.get(url).send().await?;
+        let res = self.client.get(url).send().await?.error_for_status()?;
         let text = res.text().await?;
         Ok(from_str(&text)?)
     }
 
     pub async fn media_player(&self) -> Result<MediaPlayer> {
         let url = self.url.join("query/media-player")?;
-        let res = self.client.get(url).send().await?;
+        let res = self.client.get(url).send().await?.error_for_status()?;
         let text = res.text().await?;
         Ok(from_str(&text)?)
     }
@@ -135,6 +142,11 @@ impl Device {
         self.client.post(url).query(&search).send().await?;
         Ok(())
     }
+}
+
+/// Parses the body of a `query/media-player` response.
+pub fn parse_media_player(xml: &str) -> Result<MediaPlayer> {
+    Ok(from_str(xml)?)
 }
 
 #[derive(Debug, Deserialize)]

@@ -9,10 +9,10 @@ use tauri::AppHandle;
 use tauri::Manager;
 
 use commands::{
-    check_device_connectivity_impl, discover_roku_devices_impl, get_active_app_impl,
-    get_app_icon_impl, get_media_player_impl, launch_roku_app_impl, list_roku_apps_impl,
-    send_roku_command_impl, test_network_connectivity, ActiveAppInfo, MediaPlayerInfo, RokuApp,
-    RokuDevice,
+    check_device_connectivity_impl, clear_memory_caches, discover_roku_devices_impl,
+    forget_device_impl, get_active_app_impl, get_app_icon_impl, get_media_player_impl,
+    launch_roku_app_impl, list_roku_apps_impl, send_roku_command_impl, test_network_connectivity,
+    ActiveAppInfo, MediaPlayerInfo, RokuApp, RokuDevice,
 };
 
 use background::init_background_tasks;
@@ -29,7 +29,41 @@ mod android {
     use jni::refs::Global;
     use jni::sys::{jboolean, jint};
     use jni::{jni_sig, jni_str, Env, EnvUnowned, JValue, JavaVM};
+    use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+    use tokio::sync::oneshot;
+
+    // Request codes shared with MainActivity.
+    const DISCOVERY_PERMISSION_REQUEST_CODE: i32 = 1001;
+    const NOTIFICATION_PERMISSION_REQUEST_CODE: i32 = 1002;
+
+    /// How long to wait for the user to answer a permission dialog.
+    const PERMISSION_ANSWER_TIMEOUT: Duration = Duration::from_secs(120);
+
+    /// Commands waiting on the answer to a permission dialog, by request code.
+    static PERMISSION_WAITERS: Mutex<Option<HashMap<i32, Vec<oneshot::Sender<bool>>>>> =
+        Mutex::new(None);
+
+    /// Routes Rust `log` output to logcat and makes panics visible there. The binary's `main` is
+    /// never run on Android, so this has to happen in the library entry point.
+    pub(super) fn init_logging() {
+        let level = if cfg!(debug_assertions) {
+            log::LevelFilter::Debug
+        } else {
+            log::LevelFilter::Info
+        };
+        android_logger::init_once(
+            android_logger::Config::default()
+                .with_max_level(level)
+                .with_tag("RokuRust"),
+        );
+
+        std::panic::set_hook(Box::new(|info| {
+            let backtrace = std::backtrace::Backtrace::force_capture();
+            log::error!("Rust panic: {info}\n{backtrace}");
+        }));
+    }
 
     /// The live `MainActivity`, registered by the activity itself. `ndk_context` can't supply it:
     /// since tao 0.37 it holds the Application context, which doesn't have the activity's methods.
@@ -89,28 +123,104 @@ mod android {
             .resolve::<LogErrorAndDefault>()
     }
 
-    pub(super) fn ensure_discovery_permissions() -> Result<bool, String> {
+    #[no_mangle]
+    pub extern "system" fn Java_com_rokucontroller_remote_MainActivity_nativeOnPermissionResult<
+        'caller,
+    >(
+        mut unowned_env: EnvUnowned<'caller>,
+        _activity: JObject<'caller>,
+        request_code: jint,
+        granted: jboolean,
+    ) {
+        unowned_env
+            .with_env(|_env| -> jni::errors::Result<()> {
+                let waiters = PERMISSION_WAITERS
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .as_mut()
+                    .and_then(|map| map.remove(&request_code))
+                    .unwrap_or_default();
+                for waiter in waiters {
+                    let _ = waiter.send(granted);
+                }
+                Ok(())
+            })
+            .resolve::<LogErrorAndDefault>()
+    }
+
+    fn call_bool(method: &'static jni::strings::JNIStr) -> Result<bool, String> {
+        with_activity(|env, activity| env.call_method(activity, method, jni_sig!("()Z"), &[])?.z())
+    }
+
+    fn call_void(method: &'static jni::strings::JNIStr) -> Result<(), String> {
         with_activity(|env, activity| {
-            env.call_method(
-                activity,
-                jni_str!("ensureDiscoveryPermissions"),
-                jni_sig!("()Z"),
-                &[],
-            )?
-            .z()
+            env.call_method(activity, method, jni_sig!("()V"), &[])?;
+            Ok(())
         })
     }
 
-    pub(super) fn ensure_notification_permission() -> Result<bool, String> {
-        with_activity(|env, activity| {
-            env.call_method(
-                activity,
-                jni_str!("ensureNotificationPermission"),
-                jni_sig!("()Z"),
-                &[],
-            )?
-            .z()
-        })
+    /// Returns whether the permission is held, asking the user first when it is not. Resolves
+    /// with the user's actual answer rather than returning early while the dialog is open.
+    async fn ensure_permission(
+        request_code: i32,
+        granted: fn() -> Result<bool, String>,
+        request: fn() -> Result<(), String>,
+    ) -> Result<bool, String> {
+        if granted()? {
+            return Ok(true);
+        }
+
+        let (tx, rx) = oneshot::channel();
+        PERMISSION_WAITERS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get_or_insert_with(HashMap::new)
+            .entry(request_code)
+            .or_default()
+            .push(tx);
+
+        request()?;
+
+        match tokio::time::timeout(PERMISSION_ANSWER_TIMEOUT, rx).await {
+            Ok(Ok(answer)) => Ok(answer),
+            // Timed out or the activity went away: report the current state.
+            _ => granted(),
+        }
+    }
+
+    pub(super) fn discovery_permissions_granted() -> Result<bool, String> {
+        call_bool(jni_str!("discoveryPermissionsGranted"))
+    }
+
+    pub(super) async fn ensure_discovery_permissions() -> Result<bool, String> {
+        ensure_permission(
+            DISCOVERY_PERMISSION_REQUEST_CODE,
+            discovery_permissions_granted,
+            || call_void(jni_str!("requestDiscoveryPermissions")),
+        )
+        .await
+    }
+
+    /// From Android 17, reaching a Roku on the LAN needs a runtime permission even without a
+    /// scan. On older versions this is always true and never prompts.
+    pub(super) async fn ensure_local_network_access() -> Result<bool, String> {
+        if !call_bool(jni_str!("localNetworkPermissionRequired"))? {
+            return Ok(true);
+        }
+        ensure_discovery_permissions().await
+    }
+
+    pub(super) async fn ensure_notification_permission() -> Result<bool, String> {
+        ensure_permission(
+            NOTIFICATION_PERMISSION_REQUEST_CODE,
+            || call_bool(jni_str!("notificationPermissionGranted")),
+            || call_void(jni_str!("requestNotificationPermission")),
+        )
+        .await
+    }
+
+    pub(super) fn haptic_tap() -> Result<(), String> {
+        call_void(jni_str!("performHapticTap"))
     }
 
     pub(super) fn acquire_discovery_locks() -> Result<(), String> {
@@ -285,10 +395,10 @@ mod android {
 async fn discover_roku_devices(app: tauri::AppHandle) -> Result<Vec<RokuDevice>, String> {
     #[cfg(target_os = "android")]
     {
-        let has_permissions = android::ensure_discovery_permissions()?;
-        if !has_permissions {
+        // Without access every probe would only time out, so fail before starting.
+        if !android::discovery_permissions_granted()? {
             return Err(
-                "Discovery permissions are required. Grant permission and scan again.".to_string(),
+                "Local network access is required. Grant permission and scan again.".to_string(),
             );
         }
 
@@ -346,28 +456,40 @@ async fn get_app_icon(ip: String, port: u16, app_id: String) -> Result<String, S
     get_app_icon_impl(ip, port, app_id).await
 }
 
-#[cfg(target_os = "android")]
 #[command]
-fn ensure_android_discovery_permissions() -> Result<bool, String> {
-    android::ensure_discovery_permissions()
-}
+async fn ensure_android_discovery_permissions() -> Result<bool, String> {
+    #[cfg(target_os = "android")]
+    return android::ensure_discovery_permissions().await;
 
-#[cfg(not(target_os = "android"))]
-#[command]
-fn ensure_android_discovery_permissions() -> Result<bool, String> {
+    #[cfg(not(target_os = "android"))]
     Ok(true)
 }
 
-#[cfg(target_os = "android")]
 #[command]
-fn ensure_android_notification_permission() -> Result<bool, String> {
-    android::ensure_notification_permission()
+async fn ensure_android_local_network_access() -> Result<bool, String> {
+    #[cfg(target_os = "android")]
+    return android::ensure_local_network_access().await;
+
+    #[cfg(not(target_os = "android"))]
+    Ok(true)
 }
 
-#[cfg(not(target_os = "android"))]
 #[command]
-fn ensure_android_notification_permission() -> Result<bool, String> {
+async fn ensure_android_notification_permission() -> Result<bool, String> {
+    #[cfg(target_os = "android")]
+    return android::ensure_notification_permission().await;
+
+    #[cfg(not(target_os = "android"))]
     Ok(true)
+}
+
+#[command]
+fn haptic_tap() -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    return android::haptic_tap();
+
+    #[cfg(not(target_os = "android"))]
+    Ok(())
 }
 
 #[cfg(target_os = "android")]
@@ -470,7 +592,14 @@ async fn get_cached_apps(ip: String) -> Result<Vec<RokuApp>, String> {
 
 #[tauri::command]
 async fn clear_all_data() -> Result<(), String> {
-    background::clear_all_data_bg().await
+    background::clear_all_data_bg().await?;
+    clear_memory_caches();
+    Ok(())
+}
+
+#[tauri::command]
+async fn forget_device(hardware_id: String) -> Result<(), String> {
+    forget_device_impl(hardware_id).await
 }
 
 #[tauri::command]
@@ -482,6 +611,9 @@ async fn restart_app(app: tauri::AppHandle) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(target_os = "android")]
+    android::init_logging();
+
     let builder = tauri::Builder::default()
         .plugin(opener())
         .plugin(tauri_plugin_os::init())
@@ -497,9 +629,12 @@ pub fn run() {
             get_cached_devices,
             get_cached_apps,
             clear_all_data,
+            forget_device,
             restart_app,
             ensure_android_discovery_permissions,
+            ensure_android_local_network_access,
             ensure_android_notification_permission,
+            haptic_tap,
             open_android_app_settings,
             update_media_notification,
             hide_media_notification,
@@ -512,12 +647,12 @@ pub fn run() {
             let db_path = match app.path().app_data_dir() {
                 Ok(p) => {
                     if let Err(e) = std::fs::create_dir_all(&p) {
-                        eprintln!("Failed to create app data dir: {}", e);
+                        log::error!("Failed to create app data dir: {}", e);
                     }
                     p.join("roku_cache.db")
                 }
                 Err(e) => {
-                    eprintln!("Failed to get app data dir: {}", e);
+                    log::error!("Failed to get app data dir: {}", e);
                     app.path()
                         .app_cache_dir()
                         .map(|p| p.join("roku_cache.db"))
@@ -528,7 +663,7 @@ pub fn run() {
                 let _ = std::fs::create_dir_all(parent);
             }
             if let Err(e) = init_background_tasks(db_path.to_string_lossy().to_string()) {
-                eprintln!("Failed to init cache DB: {}", e);
+                log::error!("Failed to init cache DB: {}", e);
             }
 
             start_background_discovery(app.app_handle().clone());
@@ -548,7 +683,7 @@ pub fn run() {
             let _ = std::fs::create_dir_all(parent);
         }
         if let Err(e) = init_background_tasks(db_path.to_string_lossy().to_string()) {
-            eprintln!("Failed to init cache DB: {}", e);
+            log::error!("Failed to init cache DB: {}", e);
         }
 
         #[cfg(not(target_os = "android"))]
@@ -562,7 +697,17 @@ pub fn run() {
         Ok(())
     });
 
-    builder
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+    match builder.build(tauri::generate_context!()) {
+        Ok(app) => app.run(|_app, _event| {
+            // Best effort: MainActivity also removes the notification when it finishes.
+            #[cfg(target_os = "android")]
+            if matches!(
+                _event,
+                tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
+            ) {
+                let _ = android::hide_media_notification();
+            }
+        }),
+        Err(e) => log::error!("Failed to start the Tauri application: {e}"),
+    }
 }
