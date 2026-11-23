@@ -30,7 +30,7 @@ export interface AppState {
     preferLastUsed: boolean;
     showAllDevices: boolean;
     remoteStyle: RemoteStylePreset;
-    setDevices: (devices: RokuDevice[]) => void;
+    removeDevice: (hardwareId: string) => void;
     setSelectedDevice: (device: RokuDevice | null) => void;
     updateDeviceStatus: (hardwareId: string, status: ConnectionStatus) => void;
     addDiscoveredDevices: (discovered: RokuDevice[]) => void;
@@ -114,7 +114,20 @@ export const useAppStore = create<AppState>()(
             return {
                 ...initialState,
                 
-                setDevices: (devices) => set({ devices }),
+                removeDevice: (hardwareId) => {
+                    set((state) => {
+                        const favoriteApps = { ...state.favoriteApps };
+                        delete favoriteApps[hardwareId];
+                        return {
+                            devices: state.devices.filter((d) => d.hardware_id !== hardwareId),
+                            selectedDevice:
+                                state.selectedDevice?.hardware_id === hardwareId
+                                    ? null
+                                    : state.selectedDevice,
+                            favoriteApps,
+                        };
+                    });
+                },
                 setSelectedDevice: (device) => set({ selectedDevice: device }),
             
             updateDeviceStatus: (hardwareId, status) => {

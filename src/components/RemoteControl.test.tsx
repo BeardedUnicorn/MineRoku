@@ -138,4 +138,128 @@ describe('RemoteControl', () => {
       expect(updated[updated.length - 1]).toHaveAttribute('data-remote-style', 'studio');
     });
   });
+
+  describe('layout stability', () => {
+    const playing = {
+      state: 'play',
+      error: false,
+      position: '30000 ms',
+      duration: '120000 ms',
+      is_live: false,
+    };
+
+    it('reserves the progress bar space when nothing is playing', async () => {
+      renderWithTheme(<RemoteControl device={device} />);
+
+      const progress = await screen.findByTestId('remote-progress');
+      // Present in the layout, just not visible: the buttons below keep their position.
+      expect(progress).toBeInTheDocument();
+      expect(getComputedStyle(progress).visibility).toBe('hidden');
+      expect(progress).toHaveAttribute('aria-hidden', 'true');
+      expect(progress.querySelector('[role="progressbar"]')).not.toBeNull();
+    });
+
+    it('shows the same progress element once media is playing', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      // Media state arrives through the poll, which only runs while the window has focus.
+      const hasFocus = vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+      try {
+        vi.mocked(invoke).mockImplementation((cmd: string) => {
+          if (cmd === 'get_active_app') return Promise.resolve({ name: 'Netflix', id: '12' });
+          if (cmd === 'get_media_player') return Promise.resolve(playing);
+          return Promise.resolve();
+        });
+        renderWithTheme(<RemoteControl device={device} />);
+
+        const before = await screen.findByTestId('remote-progress');
+        vi.advanceTimersByTime(2100);
+
+        await waitFor(() => {
+          expect(getComputedStyle(screen.getByTestId('remote-progress')).visibility).toBe('visible');
+        });
+        expect(screen.getByTestId('remote-progress')).toBe(before);
+        expect(screen.getByText('0:30')).toBeInTheDocument();
+        expect(screen.getByText('2:00')).toBeInTheDocument();
+      } finally {
+        hasFocus.mockRestore();
+        vi.useRealTimers();
+      }
+    });
+
+    it('shows the offline notice in the title slot instead of adding a row', async () => {
+      renderWithTheme(<RemoteControl device={{ ...device, status: 'disconnected' }} />);
+
+      const notice = await screen.findByRole('status');
+      expect(notice).toHaveTextContent(/device offline/i);
+      expect(screen.queryByText('Roku Remote')).not.toBeInTheDocument();
+    });
+  });
+
+  it('delivers every press of a repeated button, in order', async () => {
+    const sent: string[] = [];
+    let release: (() => void) | undefined;
+    vi.mocked(invoke).mockImplementation((cmd: string, args?: unknown) => {
+      if (cmd === 'get_active_app') return Promise.resolve({ name: 'Home', id: 'home' });
+      if (cmd === 'send_roku_command') {
+        sent.push((args as { command: string }).command);
+        // The first request stays in flight while the others are pressed.
+        if (sent.length === 1) {
+          return new Promise<void>((resolve) => {
+            release = resolve;
+          });
+        }
+      }
+      return Promise.resolve();
+    });
+    renderWithTheme(<RemoteControl device={device} />);
+
+    const down = (await screen.findAllByLabelText('Down'))[0];
+    await userEvent.click(down);
+    await userEvent.click(down);
+    await userEvent.click(down);
+    expect(sent).toEqual(['down']);
+
+    release?.();
+    await waitFor(() => expect(sent).toEqual(['down', 'down', 'down']));
+  });
+
+  describe('keyboard shortcuts', () => {
+    const sentCommands = () =>
+      vi
+        .mocked(invoke)
+        .mock.calls.filter(([cmd]) => cmd === 'send_roku_command')
+        .map(([, args]) => (args as { command: string }).command);
+
+    it('leaves Escape to an open dialog instead of sending Back', async () => {
+      renderWithTheme(<RemoteControl device={device} />);
+
+      const [statusButton] = await screen.findAllByRole('button', { name: /open media player status/i });
+      await userEvent.click(statusButton);
+      await screen.findByRole('dialog');
+      vi.mocked(invoke).mockClear();
+
+      await userEvent.keyboard('{Escape}');
+
+      expect(sentCommands()).toEqual([]);
+    });
+
+    it('ignores shortcuts combined with Ctrl or Cmd', async () => {
+      renderWithTheme(<RemoteControl device={device} />);
+      await screen.findByTestId('remote-control-shell');
+
+      await userEvent.keyboard('{Control>}={/Control}{Meta>}h{/Meta}');
+
+      expect(sentCommands()).toEqual([]);
+    });
+
+    it('sends only the focused button\'s command on Enter', async () => {
+      renderWithTheme(<RemoteControl device={device} />);
+
+      const homeBtn = await screen.findByLabelText('Home');
+      homeBtn.focus();
+      await userEvent.keyboard('{Enter}');
+
+      expect(sentCommands()).toEqual(['home']);
+    });
+  });
 });

@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useBackHandler } from '../hooks/useBackHandler';
 import {
     Dialog,
     DialogTitle,
@@ -36,9 +37,20 @@ const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({ open, onClose, devi
     const [mediaInfo, setMediaInfo] = useState<MediaPlayerInfo | null>(null);
     const [refreshing, setRefreshing] = useState(false);
 
-    const fetchMediaPlayerInfo = useCallback(async () => {
+    const inFlightRef = useRef(false);
+
+    useBackHandler(open, onClose);
+
+    // `background` polls update silently; only a manual refresh shows the progress bar.
+    const fetchMediaPlayerInfo = useCallback(async (background = false) => {
+        if (inFlightRef.current) {
+            return;
+        }
+        inFlightRef.current = true;
         try {
-            setRefreshing(true);
+            if (!background) {
+                setRefreshing(true);
+            }
             const info = await getMediaPlayer(device.ip, device.port);
             setMediaInfo(info);
             setError(null);
@@ -52,6 +64,7 @@ const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({ open, onClose, devi
             
             setError(errorMessage);
         } finally {
+            inFlightRef.current = false;
             setLoading(false);
             setRefreshing(false);
         }
@@ -64,7 +77,9 @@ const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({ open, onClose, devi
             void fetchMediaPlayerInfo();
 
             const interval = setInterval(() => {
-                void fetchMediaPlayerInfo();
+                if (document.visibilityState === 'visible') {
+                    void fetchMediaPlayerInfo(true);
+                }
             }, 2000);
             return () => clearInterval(interval);
         }
@@ -290,7 +305,7 @@ const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({ open, onClose, devi
                     <IconButton
                         aria-label="close"
                         onClick={onClose}
-                        sx={{ color: 'text.secondary' }}
+                        sx={{ color: 'text.secondary', width: 48, height: 48 }}
                     >
                         <CloseIcon />
                     </IconButton>
@@ -306,7 +321,7 @@ const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({ open, onClose, devi
                 {renderContent()}
             </DialogContent>
             <DialogActions>
-                <Button onClick={fetchMediaPlayerInfo} disabled={refreshing}>
+                <Button onClick={() => void fetchMediaPlayerInfo()} disabled={refreshing}>
                     Refresh
                 </Button>
                 <Button onClick={onClose} variant="contained">
