@@ -1,40 +1,56 @@
 package com.rokucontroller.remote
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
 import android.util.Base64
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import androidx.media.app.NotificationCompat.MediaStyle
-import java.lang.ref.WeakReference
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/**
+ * Owns the media session and the remote-control notification.
+ *
+ * The notification is a plain (non-foreground-service) MediaStyle notification: it is posted by
+ * [show] while the activity is visible and removed by [hide]. Its buttons are explicit broadcasts
+ * to [MediaControlReceiver], which work whether or not this object exists.
+ *
+ * All mutable state is confined to the main thread; only the native calls run on IO.
+ */
 class MediaSessionManager private constructor(context: Context) {
     private val appContext: Context = context.applicationContext
 
     companion object {
         const val CHANNEL_ID = "roku_media_controls"
         const val NOTIFICATION_ID = 1001
+        const val ACTION_PREFIX = "com.rokucontroller.remote.MEDIA_ACTION."
+        const val ACTION_DISMISSED = "com.rokucontroller.remote.MEDIA_DISMISSED"
         private const val TAG = "RokuMediaSession"
 
-        private var instanceRef: WeakReference<MediaSessionManager>? = null
+        @Volatile
+        private var instance: MediaSessionManager? = null
         private val appIconCache = ConcurrentHashMap<String, Bitmap>()
 
         @JvmStatic
@@ -47,27 +63,27 @@ class MediaSessionManager private constructor(context: Context) {
             System.loadLibrary("roku_controller_lib")
         }
 
+        /** Must be called on the main thread. */
         fun getInstance(context: Context): MediaSessionManager {
-            val existing = instanceRef?.get()
-            if (existing != null) {
-                return existing
+            return instance ?: synchronized(this) {
+                instance ?: MediaSessionManager(context.applicationContext).also { instance = it }
             }
+        }
 
-            return synchronized(this) {
-                val fromRef = instanceRef?.get()
-                if (fromRef != null) {
-                    fromRef
-                } else {
-                    MediaSessionManager(context.applicationContext).also {
-                        instanceRef = WeakReference(it)
-                    }
-                }
-            }
+        /** The manager if one has been created in this process; never creates one. */
+        fun peek(): MediaSessionManager? = instance
+
+        /** Blocking; call from a background thread. Needs no manager instance. */
+        fun sendCommandBlocking(ip: String, port: Int, command: String): Boolean {
+            val actualCommand = if (command == "play_pause") "play" else command
+            return nativeSendRokuCommand(ip, port, actualCommand)
         }
     }
 
-    private var mediaSession: MediaSessionCompat? = null
-    private var notificationManager: NotificationManager? = null
+    private val notificationManager =
+        appContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    private val mediaSession: MediaSessionCompat
+    private var active = false
     private var currentDeviceName: String = "Roku"
     private var currentDeviceIp: String = ""
     private var currentDevicePort: Int = 8060
@@ -76,11 +92,33 @@ class MediaSessionManager private constructor(context: Context) {
     private var isPlaying: Boolean = false
     private var lastActionLabel: String? = null
     private var clearActionJob: Job? = null
-    private val coroutineScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val coroutineScope = CoroutineScope(Dispatchers.Main.immediate + SupervisorJob())
 
     init {
         createNotificationChannel()
-        initMediaSession()
+        mediaSession = MediaSessionCompat(appContext, TAG).apply {
+            // An explicit main-looper handler: the default overload creates a Handler on the
+            // calling thread and throws when that thread has no Looper.
+            setCallback(
+                object : MediaSessionCompat.Callback() {
+                    override fun onPlay() = onTransportCommand("play", playing = true)
+
+                    // Roku uses a single toggle for play/pause.
+                    override fun onPause() = onTransportCommand("play", playing = false)
+
+                    override fun onStop() = onTransportCommand("home", playing = false)
+
+                    override fun onSkipToNext() = onTransportCommand("fwd", playing = null)
+
+                    override fun onSkipToPrevious() = onTransportCommand("rev", playing = null)
+
+                    override fun onFastForward() = onTransportCommand("fwd", playing = null)
+
+                    override fun onRewind() = onTransportCommand("rev", playing = null)
+                },
+                Handler(Looper.getMainLooper()),
+            )
+        }
     }
 
     private fun createNotificationChannel() {
@@ -94,131 +132,91 @@ class MediaSessionManager private constructor(context: Context) {
                 setShowBadge(false)
                 lockscreenVisibility = Notification.VISIBILITY_PUBLIC
             }
-
-            notificationManager = appContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            notificationManager?.createNotificationChannel(channel)
-        } else {
-            notificationManager = appContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            notificationManager.createNotificationChannel(channel)
         }
     }
 
-    private fun initMediaSession() {
-        mediaSession = MediaSessionCompat(appContext, TAG).apply {
-            setCallback(object : MediaSessionCompat.Callback() {
-                override fun onPlay() {
-                    sendRokuCommand("play")
-                    isPlaying = true
-                    updatePlaybackState()
-                    updateNotification()
-                }
-
-                override fun onPause() {
-                    sendRokuCommand("play") // Roku uses toggle for play/pause
-                    isPlaying = false
-                    updatePlaybackState()
-                    updateNotification()
-                }
-
-                override fun onStop() {
-                    sendRokuCommand("home")
-                    isPlaying = false
-                    updatePlaybackState()
-                    updateNotification()
-                }
-
-                override fun onSkipToNext() {
-                    sendRokuCommand("fwd")
-                }
-
-                override fun onSkipToPrevious() {
-                    sendRokuCommand("rev")
-                }
-
-                override fun onFastForward() {
-                    sendRokuCommand("fwd")
-                }
-
-                override fun onRewind() {
-                    sendRokuCommand("rev")
-                }
-            })
-
-            isActive = true
+    /** Shows or refreshes the notification for the given device and app. Main thread only. */
+    fun show(
+        deviceName: String,
+        deviceIp: String,
+        devicePort: Int,
+        appName: String,
+        appId: String?,
+        isPlaying: Boolean,
+    ) {
+        if (deviceIp.isBlank()) {
+            hide()
+            return
         }
-    }
 
-    fun updateDevice(name: String, ip: String, port: Int) {
-        currentDeviceName = if (name.isBlank()) "Roku" else name
-        currentDeviceIp = ip
-        currentDevicePort = port
-        updateMetadata()
-        updateNotification()
-    }
-
-    fun updateMediaInfo(appName: String, appId: String?, isPlaying: Boolean) {
-        this.currentAppName = appName.ifBlank { "Ready" }
+        active = true
+        mediaSession.isActive = true
+        currentDeviceName = deviceName.ifBlank { "Roku" }
+        currentDeviceIp = deviceIp
+        currentDevicePort = devicePort
+        currentAppName = appName.ifBlank { "Ready" }
         this.isPlaying = isPlaying
         clearActionJob?.cancel()
         lastActionLabel = null
 
         val normalizedAppId = appId?.takeIf { it.isNotBlank() && it != "roku" }
-        if (normalizedAppId == null || currentDeviceIp.isBlank()) {
-            currentAppIcon = null
-            updateMetadata()
-            updatePlaybackState()
-            updateNotification()
+        val cacheKey = normalizedAppId?.let { "$deviceIp:$devicePort:$it" }
+        currentAppIcon = cacheKey?.let { appIconCache[it] }
+        refresh()
+
+        if (normalizedAppId == null || cacheKey == null || currentAppIcon != null) {
             return
         }
 
-        val cacheKey = buildIconCacheKey(currentDeviceIp, currentDevicePort, normalizedAppId)
-        val cached = appIconCache[cacheKey]
-        if (cached != null) {
-            currentAppIcon = cached
-            updateMetadata()
-            updatePlaybackState()
-            updateNotification()
-            return
-        }
-
-        val ipSnapshot = currentDeviceIp
-        val portSnapshot = currentDevicePort
         val appSnapshot = currentAppName
-        currentAppIcon = null
-        updateMetadata()
-        updatePlaybackState()
-        updateNotification()
-
         coroutineScope.launch {
-            try {
-                val dataUrl = nativeGetAppIconDataUrl(ipSnapshot, portSnapshot, normalizedAppId)
-                val bitmap = decodeDataUrlToBitmap(dataUrl)
-                if (bitmap != null) {
-                    appIconCache[cacheKey] = bitmap
-                }
-
-                withContext(Dispatchers.Main) {
-                    if (
-                        currentDeviceIp == ipSnapshot &&
-                        currentDevicePort == portSnapshot &&
-                        currentAppName == appSnapshot
-                    ) {
-                        currentAppIcon = bitmap
-                        updateMetadata()
-                        updateNotification()
-                    }
+            val bitmap = try {
+                withContext(Dispatchers.IO) {
+                    decodeDataUrlToBitmap(
+                        nativeGetAppIconDataUrl(deviceIp, devicePort, normalizedAppId),
+                    )
                 }
             } catch (e: Exception) {
-                android.util.Log.e(TAG, "Failed to load app icon via native bridge: ${e.message}", e)
+                android.util.Log.e(TAG, "Failed to load app icon: ${e.message}", e)
+                null
+            } ?: return@launch
+
+            appIconCache[cacheKey] = bitmap
+            if (
+                active &&
+                currentDeviceIp == deviceIp &&
+                currentDevicePort == devicePort &&
+                currentAppName == appSnapshot
+            ) {
+                currentAppIcon = bitmap
+                refresh()
             }
         }
     }
 
-    fun handleNotificationAction(command: String, ip: String?, port: Int?): Job? {
-        if (!ip.isNullOrBlank()) {
-            currentDeviceIp = ip
-            if (port != null && port > 0) {
-                currentDevicePort = port
-            }
+    /** Removes the notification and deactivates the session. Safe to call repeatedly. */
+    fun hide() {
+        active = false
+        clearActionJob?.cancel()
+        clearActionJob = null
+        lastActionLabel = null
+        coroutineScope.coroutineContext.cancelChildren()
+        try {
+            mediaSession.isActive = false
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "Failed to deactivate media session: ${e.message}")
+        }
+        notificationManager.cancel(NOTIFICATION_ID)
+    }
+
+    /**
+     * Reflects a notification button press in the notification text. The command itself is sent by
+     * [MediaControlReceiver]. Main thread only.
+     */
+    fun onNotificationAction(command: String) {
+        if (!active) {
+            return
         }
 
         val label = when (command) {
@@ -231,32 +229,43 @@ class MediaSessionManager private constructor(context: Context) {
             else -> null
         }
 
-        label?.let { setLastAction(it) }
-
         if (command == "play_pause") {
             isPlaying = !isPlaying
-            updatePlaybackState()
         } else if (command == "home") {
             isPlaying = false
-            updatePlaybackState()
         }
 
-        updateNotification()
-        return sendRokuCommand(command)
-    }
-
-    private fun setLastAction(label: String) {
-        lastActionLabel = label
-        clearActionJob?.cancel()
-        clearActionJob = coroutineScope.launch {
-            delay(1500)
-            lastActionLabel = null
-            updateNotification()
+        if (label != null) {
+            lastActionLabel = label
+            clearActionJob?.cancel()
+            clearActionJob = coroutineScope.launch {
+                delay(1500)
+                lastActionLabel = null
+                refresh()
+            }
         }
+
+        refresh()
     }
 
-    private fun buildIconCacheKey(ip: String, port: Int, appId: String): String {
-        return "$ip:$port:$appId"
+    private fun onTransportCommand(command: String, playing: Boolean?) {
+        if (!active || currentDeviceIp.isBlank()) {
+            return
+        }
+
+        val ip = currentDeviceIp
+        val port = currentDevicePort
+        coroutineScope.launch {
+            val success = withContext(Dispatchers.IO) { sendCommandBlocking(ip, port, command) }
+            if (!success) {
+                android.util.Log.w(TAG, "Roku command failed: $command")
+            }
+        }
+
+        if (playing != null) {
+            isPlaying = playing
+            refresh()
+        }
     }
 
     private fun decodeDataUrlToBitmap(dataUrl: String?): Bitmap? {
@@ -271,12 +280,35 @@ class MediaSessionManager private constructor(context: Context) {
         }
 
         return try {
-            val base64Part = dataUrl.substring(idx + marker.length)
-            val bytes = Base64.decode(base64Part, Base64.DEFAULT)
+            val bytes = Base64.decode(dataUrl.substring(idx + marker.length), Base64.DEFAULT)
             BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
         } catch (_: Exception) {
             null
         }
+    }
+
+    private fun refresh() {
+        if (!active) {
+            return
+        }
+
+        try {
+            updateMetadata()
+            updatePlaybackState()
+            if (canPostNotifications()) {
+                notificationManager.notify(NOTIFICATION_ID, buildNotification())
+            }
+        } catch (e: Exception) {
+            android.util.Log.e(TAG, "Failed to update media notification: ${e.message}", e)
+        }
+    }
+
+    private fun canPostNotifications(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            return true
+        }
+        return ContextCompat.checkSelfPermission(appContext, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
     }
 
     private fun updateMetadata() {
@@ -290,7 +322,7 @@ class MediaSessionManager private constructor(context: Context) {
             metadata.putBitmap(MediaMetadataCompat.METADATA_KEY_ART, it)
         }
 
-        mediaSession?.setMetadata(metadata.build())
+        mediaSession.setMetadata(metadata.build())
     }
 
     private fun updatePlaybackState() {
@@ -314,81 +346,78 @@ class MediaSessionManager private constructor(context: Context) {
             .setState(state, PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN, 1f)
             .build()
 
-        mediaSession?.setPlaybackState(playbackState)
+        mediaSession.setPlaybackState(playbackState)
     }
 
-    private fun updateNotification() {
-        notificationManager?.notify(NOTIFICATION_ID, buildNotification())
-    }
+    private fun buildNotification(): Notification {
+        val launchIntent = appContext.packageManager.getLaunchIntentForPackage(appContext.packageName)
+        val contentIntent = launchIntent?.let {
+            PendingIntent.getActivity(
+                appContext,
+                0,
+                it,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+        }
 
-    fun buildNotification(): Notification {
-        val intent = appContext.packageManager.getLaunchIntentForPackage(appContext.packageName)
-        val pendingIntent = PendingIntent.getActivity(
+        val dismissIntent = PendingIntent.getBroadcast(
             appContext,
-            0,
-            intent,
+            ACTION_DISMISSED.hashCode(),
+            Intent(appContext, MediaControlReceiver::class.java).apply { action = ACTION_DISMISSED },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
         val mediaStyle = MediaStyle()
-            .setMediaSession(mediaSession?.sessionToken)
+            .setMediaSession(mediaSession.sessionToken)
             .setShowActionsInCompactView(0, 1, 2) // vol-, play/pause, vol+
 
-        val title = if (currentDeviceName.isBlank()) "Roku" else currentDeviceName
         val contentText = if (lastActionLabel.isNullOrBlank()) {
             currentAppName
         } else {
-            "${currentAppName} • ${lastActionLabel}"
+            "$currentAppName • $lastActionLabel"
         }
 
         val builder = NotificationCompat.Builder(appContext, CHANNEL_ID)
-            .setContentTitle(title)
+            .setContentTitle(currentDeviceName)
             .setContentText(contentText)
             .setSmallIcon(android.R.drawable.ic_media_play)
-            .setContentIntent(pendingIntent)
+            .setContentIntent(contentIntent)
+            .setDeleteIntent(dismissIntent)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setOngoing(true)
+            // Not ongoing: no service backs this notification, so if the process is killed the
+            // user must still be able to swipe a leftover away.
+            .setOngoing(false)
             .setStyle(mediaStyle)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOnlyAlertOnce(true)
 
-        currentAppIcon?.let {
-            builder.setLargeIcon(it)
-        }
+        currentAppIcon?.let { builder.setLargeIcon(it) }
 
         builder.addAction(
             android.R.drawable.ic_lock_silent_mode,
             "Vol-",
             createMediaActionPendingIntent("VolumeDown"),
         )
-
-        val playPauseIcon =
-            if (isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
-        val playPauseTitle = if (isPlaying) "Pause" else "Play"
         builder.addAction(
-            playPauseIcon,
-            playPauseTitle,
+            if (isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
+            if (isPlaying) "Pause" else "Play",
             createMediaActionPendingIntent("play_pause"),
         )
-
         builder.addAction(
             android.R.drawable.ic_lock_silent_mode_off,
             "Vol+",
             createMediaActionPendingIntent("VolumeUp"),
         )
-
         builder.addAction(
             android.R.drawable.ic_media_rew,
             "Rewind",
             createMediaActionPendingIntent("rev"),
         )
-
         builder.addAction(
             android.R.drawable.ic_media_ff,
             "Forward",
             createMediaActionPendingIntent("fwd"),
         )
-
         builder.addAction(
             android.R.drawable.ic_delete,
             "Home",
@@ -400,7 +429,7 @@ class MediaSessionManager private constructor(context: Context) {
 
     private fun createMediaActionPendingIntent(action: String): PendingIntent {
         val intent = Intent(appContext, MediaControlReceiver::class.java).apply {
-            this.action = "com.rokucontroller.remote.MEDIA_ACTION.$action"
+            this.action = ACTION_PREFIX + action
             putExtra("command", action)
             putExtra("ip", currentDeviceIp)
             putExtra("port", currentDevicePort)
@@ -412,35 +441,5 @@ class MediaSessionManager private constructor(context: Context) {
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-    }
-
-    private fun sendRokuCommand(command: String): Job? {
-        if (currentDeviceIp.isBlank()) {
-            android.util.Log.w(TAG, "Cannot send command: no device IP set")
-            return null
-        }
-
-        val actualCommand = when (command) {
-            "play_pause" -> "play"
-            else -> command
-        }
-
-        return coroutineScope.launch {
-            val success = nativeSendRokuCommand(currentDeviceIp, currentDevicePort, actualCommand)
-            if (!success) {
-                android.util.Log.w(TAG, "Native Roku command failed: $actualCommand")
-            }
-        }
-    }
-
-    fun hideNotification() {
-        notificationManager?.cancel(NOTIFICATION_ID)
-    }
-
-    fun release() {
-        coroutineScope.cancel()
-        mediaSession?.release()
-        hideNotification()
-        instanceRef = null
     }
 }

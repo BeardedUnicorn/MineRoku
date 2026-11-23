@@ -205,9 +205,13 @@ mine-roku/
 ### App Launch Issues
 - Ensure the app is properly installed on the Roku device
 - Some apps may require specific parameters or may not support ECP launch
-- Check the app ID is correct (visible in the app details)
 
 ## Android Build Configuration
+
+The app compiles against and targets Android 17 (API 37); `setup-env.sh` installs the matching
+SDK platform and NDK r28 (16 KB page-size aligned native libraries). On Android 17 the app asks
+for "Nearby devices" (local network) access the first time it needs to reach a Roku; without it
+nothing on the LAN is reachable. Rust logs and panics appear in logcat under the tag `RokuRust`.
 
 When customizing the Gradle properties `archList` and `targetList` for the Android build,
 ensure both lists contain the same number of entries so each architecture pairs with a

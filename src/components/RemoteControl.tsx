@@ -16,6 +16,7 @@ import {
   Divider,
   CircularProgress,
   LinearProgress,
+  Portal,
 } from '@mui/material';
 import { motion, useReducedMotion } from 'framer-motion';
 import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp';
@@ -43,6 +44,7 @@ import {
   getActiveApp,
   getAppIcon,
   getMediaPlayer,
+  hapticTap,
   openAndroidAppSettings,
   sendRokuCommand,
   updateMediaNotification,
@@ -59,6 +61,38 @@ interface RemoteControlProps {
 }
 
 type FeedbackState = { message: string; severity: 'success' | 'error' } | null;
+
+// Presses wait their turn instead of being dropped, up to this many.
+const MAX_QUEUED_COMMANDS = 8;
+
+// Asked once per app run: a denial must not re-prompt on every app or playback change.
+let notificationPermission: 'unknown' | 'granted' | 'denied' = 'unknown';
+
+/** Test hook: forget the remembered notification-permission answer. */
+export const resetNotificationPermissionForTests = () => {
+  notificationPermission = 'unknown';
+};
+
+// Keys that activate the focused control natively. Sending a remote command as well would fire
+// two commands for one key press.
+const isInteractiveTarget = (target: EventTarget | null) => {
+  const el = target as HTMLElement | null;
+  return Boolean(
+    el?.closest?.('button, a[href], select, summary, [role="button"], [role="tab"], [role="combobox"], [role="switch"]')
+  );
+};
+
+const isEditableTarget = (target: EventTarget | null) => {
+  const el = target as HTMLElement | null;
+  if (!el) return false;
+  const tag = el.tagName?.toLowerCase();
+  if (tag === 'input' || tag === 'textarea' || el.isContentEditable) return true;
+  return el.getAttribute?.('role') === 'textbox';
+};
+
+// An open dialog or menu owns the keyboard (Escape closes it, arrows move within it).
+const isOverlayOpen = () =>
+  document.querySelector('[role="dialog"], [role="listbox"], [role="menu"]') !== null;
 
 
 interface RemoteButtonProps {
@@ -260,8 +294,13 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
   const [isAppLoading, setIsAppLoading] = useState<boolean>(true);
   const [mediaInfo, setMediaInfo] = useState<MediaPlayerInfo | null>(null);
   const [mediaModalOpen, setMediaModalOpen] = useState(false);
+  // Mounted on first open and kept, so the dialog's close animation can play.
+  const [mediaModalMounted, setMediaModalMounted] = useState(false);
+  const [resumeCount, setResumeCount] = useState(0);
   const lastDeviceKeyRef = useRef<string | null>(null);
-  const busyRef = useRef<Set<string>>(new Set());
+  const commandQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const queuedCommandsRef = useRef(0);
+  const queueGenerationRef = useRef(0);
   const abortControllerRef = useRef<AbortController | null>(null);
   const deviceStatusRef = useRef<RokuDevice['status']>(device.status);
   const remoteStyle = useAppStore((s) => s.remoteStyle);
@@ -269,7 +308,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
   // The 300px phone D-pad needs 300 + 52 (page gutters) + 4 (card border) to avoid clipping.
   const fitsPhoneDpad = useMediaQuery('(min-width:356px)');
   const currentPlatform = usePlatform();
-  const notificationPermissionReadyRef = useRef(currentPlatform !== 'android');
+  const isConnected = device.status === 'connected';
   const activeAppIcon = useActiveAppIcon(device, activeApp);
   const dpadMetrics = useMemo(
     () => getDpadMetrics(isPhone && fitsPhoneDpad),
@@ -280,10 +319,6 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
     () => getRemoteStyleTokens(remoteStyle, theme),
     [remoteStyle, theme]
   );
-
-  useEffect(() => {
-    notificationPermissionReadyRef.current = currentPlatform !== 'android';
-  }, [currentPlatform]);
 
   useEffect(() => {
     deviceStatusRef.current = device.status;
@@ -371,10 +406,12 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
         abortControllerRef.current.abort();
       }
     };
-  }, [device.hardware_id, device.ip, device.port]);
+    // isConnected: a device that was offline at mount is fetched as soon as it comes back.
+  }, [device.hardware_id, device.ip, device.port, isConnected]);
 
   useEffect(() => {
     let intervalId: number | undefined;
+    let inFlight = false;
 
     const fetchActiveApp = async () => {
       if (deviceStatusRef.current && deviceStatusRef.current !== 'connected') {
@@ -401,12 +438,23 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
       }
     };
 
+    // A slow device must not pile up overlapping requests.
     const fetchAll = async () => {
-      await Promise.all([fetchActiveApp(), fetchMediaInfo()]);
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        await Promise.all([fetchActiveApp(), fetchMediaInfo()]);
+      } finally {
+        inFlight = false;
+      }
     };
 
-    const startPolling = () => {
+    const startPolling = (refreshNow: boolean) => {
       if (intervalId) return;
+      if (refreshNow) {
+        // Coming back to the app: do not show stale state until the next tick.
+        void fetchAll();
+      }
       intervalId = window.setInterval(fetchAll, 2000);
     };
 
@@ -417,17 +465,27 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
       }
     };
 
+    // Desktop pauses while another window has focus. A phone WebView reports no focus until the
+    // first touch, so requiring it there delayed the first poll and made the progress bar and
+    // active app appear under the user's first tap; on touch platforms only visibility counts.
+    const requireFocus = currentPlatform !== 'android' && currentPlatform !== 'ios';
+    const canPoll = () =>
+      document.visibilityState === 'visible' && (!requireFocus || document.hasFocus());
+
     const onFocus = () => {
-      startPolling();
+      startPolling(true);
     };
 
     const onBlur = () => {
-      stopPolling();
+      if (requireFocus) {
+        stopPolling();
+      }
     };
 
     const onVisibilityChange = () => {
-      if (document.visibilityState === 'visible' && document.hasFocus()) {
-        startPolling();
+      if (canPoll()) {
+        startPolling(true);
+        setResumeCount((count) => count + 1);
       } else {
         stopPolling();
       }
@@ -437,8 +495,9 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
     window.addEventListener('blur', onBlur);
     document.addEventListener('visibilitychange', onVisibilityChange);
 
-    if (document.visibilityState === 'visible' && document.hasFocus()) {
-      startPolling();
+    if (canPoll()) {
+      // Fetch straight away: media state only arrives through this poll.
+      startPolling(true);
     }
 
     return () => {
@@ -447,48 +506,56 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
       window.removeEventListener('blur', onBlur);
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
-  }, [device.hardware_id, device.ip, device.port]);
+  }, [device.hardware_id, device.ip, device.port, currentPlatform]);
 
+  // Commands go out one at a time, in the order pressed. Rapid presses (scrolling a list on the
+  // TV) queue up instead of being dropped; a failure discards whatever is still waiting so a
+  // dead device does not produce a string of timeouts.
   const sendCommand = useCallback(
-    async (command: string) => {
-      if (deviceStatusRef.current && deviceStatusRef.current !== 'connected') {
-        setFeedback({ message: 'Device appears offline', severity: 'error' });
+    (command: string) => {
+      if (currentPlatform === 'android') {
+        hapticTap();
+      }
+      if (queuedCommandsRef.current >= MAX_QUEUED_COMMANDS) {
         return;
       }
-      if (busyRef.current.has(command)) return;
-      busyRef.current.add(command);
-      try {
-        await sendRokuCommand(device.ip, device.port, command);
-      } catch (error) {
-        console.error(`Error sending command ${command}:`, error);
-        setFeedback({
-          message: `Error: ${String(error)}`,
-          severity: 'error',
-        });
-      } finally {
-        busyRef.current.delete(command);
-      }
+
+      queuedCommandsRef.current += 1;
+      const generation = queueGenerationRef.current;
+      commandQueueRef.current = commandQueueRef.current.then(async () => {
+        try {
+          if (generation !== queueGenerationRef.current) {
+            return;
+          }
+          await sendRokuCommand(device.ip, device.port, command);
+        } catch (error) {
+          console.error(`Error sending command ${command}:`, error);
+          queueGenerationRef.current += 1;
+          setFeedback({
+            message: `Error: ${String(error)}`,
+            severity: 'error',
+          });
+        } finally {
+          queuedCommandsRef.current -= 1;
+        }
+      });
     },
-    [device.ip, device.port]
+    [device.ip, device.port, currentPlatform]
   );
 
   useEffect(() => {
-    if (currentPlatform === 'android' || currentPlatform === 'ios') {
-        return;
+    // Until the platform is known, assume a touch device rather than hijack its keys.
+    if (currentPlatform === null || currentPlatform === 'android' || currentPlatform === 'ios') {
+      return;
     }
 
-    const isEditableTarget = (target: EventTarget | null) => {
-      const el = target as HTMLElement | null;
-      if (!el) return false;
-      const tag = el.tagName?.toLowerCase();
-      if (tag === 'input' || tag === 'textarea' || el.isContentEditable) return true;
-      if (el.getAttribute?.('role') === 'textbox') return true;
-      return false;
-    };
-
     const handler = (e: KeyboardEvent) => {
-      if (isEditableTarget(e.target)) return;
+      if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (isEditableTarget(e.target) || isOverlayOpen()) return;
+
       const key = e.key.toLowerCase();
+      if ((key === 'enter' || key === ' ') && isInteractiveTarget(e.target)) return;
+
       switch (key) {
         case 'arrowup':
           e.preventDefault();
@@ -507,6 +574,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
           sendCommand('right');
           break;
         case 'enter':
+          e.preventDefault();
           sendCommand('select');
           break;
         case ' ':
@@ -546,20 +614,26 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
   useEffect(() => {
     if (currentPlatform !== 'android' || !activeApp) return;
 
+    // The notification is only refreshed while the app is on screen. A poll that was in flight
+    // when the app was backgrounded must not bring it back.
+    if (document.visibilityState !== 'visible') return;
+
     const updateNotification = async () => {
       try {
-        if (!notificationPermissionReadyRef.current) {
+        if (notificationPermission === 'denied') {
+          return;
+        }
+        if (notificationPermission === 'unknown') {
           const hasPermission = await ensureAndroidNotificationPermission();
+          notificationPermission = hasPermission ? 'granted' : 'denied';
           if (!hasPermission) {
             setShowSettingsAction(true);
             setFeedback({
-              message:
-                'Notification permission is required for lock-screen controls. Grant permission and retry.',
+              message: 'Allow notifications to get lock-screen controls for your Roku.',
               severity: 'error',
             });
             return;
           }
-          notificationPermissionReadyRef.current = true;
           setShowSettingsAction(false);
         }
 
@@ -588,6 +662,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
     activeApp?.id,
     activeApp?.name,
     mediaInfo?.state,
+    resumeCount,
   ]);
 
   const systemButtons = useMemo<CommandSpec[]>(() => systemButtonSpecs, []);
@@ -600,7 +675,9 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
   const progress = duration > 0 ? (position / duration) * 100 : 0;
   const mediaState = mediaInfo?.state?.toLowerCase() ?? '';
   const isPlaying = mediaState === 'play' || mediaState === 'playing';
-  const showProgress = mediaInfo && !mediaInfo.is_live && duration > 0 && (mediaState === 'play' || mediaState === 'pause');
+  const showProgress = Boolean(
+    mediaInfo && !mediaInfo.is_live && duration > 0 && (mediaState === 'play' || mediaState === 'pause')
+  );
   const remoteBackground = activeAppIcon
     ? `${styleTokens.activeAppOverlay}, url(${activeAppIcon})`
     : styleTokens.cardBackground;
@@ -634,39 +711,58 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
         overflow: 'hidden',
       }}
     >
-      <Typography
-        variant="subtitle1"
-        sx={{ fontWeight: 700, letterSpacing: 0.5, color: styleTokens.titleColor }}
-      >
-        Roku Remote
-      </Typography>
-
-      {device.status && device.status !== 'connected' && (
-        <Box sx={{
+      {/* One fixed-height slot for the title or the offline notice, so the buttons below never
+          move when the device drops off or comes back. */}
+      <Box
+        sx={{
           width: '100%',
-          bgcolor: 'warning.light',
-          color: 'warning.contrastText',
-          borderRadius: 1,
-          mb: 1,
-          p: 1,
-          textAlign: 'center',
-          fontWeight: 500,
-        }}>
-          Device offline — waiting for discovery
-        </Box>
-      )}
+          height: 32,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        {isConnected ? (
+          <Typography
+            variant="subtitle1"
+            sx={{ fontWeight: 700, letterSpacing: 0.5, color: styleTokens.titleColor }}
+          >
+            Roku Remote
+          </Typography>
+        ) : (
+          <Typography
+            role="status"
+            variant="body2"
+            noWrap
+            sx={{
+              maxWidth: '100%',
+              px: 1.5,
+              py: 0.5,
+              bgcolor: 'warning.light',
+              color: 'warning.contrastText',
+              borderRadius: 1,
+              fontWeight: 500,
+            }}
+          >
+            Device offline — reconnecting…
+          </Typography>
+        )}
+      </Box>
 
       <Box sx={{ width: '100%' }}>
         <ButtonBase
           aria-label="Open Media Player Status"
-          onClick={() => setMediaModalOpen(true)}
+          onClick={() => {
+            setMediaModalMounted(true);
+            setMediaModalOpen(true);
+          }}
           sx={{
             width: '100%',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             gap: 1.5,
-            minHeight: 40,
+            minHeight: 48,
             px: 2,
             py: 1,
             borderRadius: 2,
@@ -694,8 +790,14 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
           )}
         </ButtonBase>
 
-        {showProgress && (
-          <Box sx={{mt: 1.5 }}>
+        {/* Always in the layout, only hidden when there is nothing to show: the remote keeps the
+            size it has with the progress bar, so buttons do not jump under the user's thumb
+            when playback starts or stops. */}
+        <Box
+          data-testid="remote-progress"
+          aria-hidden={!showProgress}
+          sx={{ mt: 1.5, visibility: showProgress ? 'visible' : 'hidden' }}
+        >
             <LinearProgress
               variant="determinate"
               value={progress}
@@ -717,8 +819,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
                 {formatTime(duration)}
               </Typography>
             </Box>
-          </Box>
-        )}
+        </Box>
       </Box>
 
       <Stack
@@ -862,7 +963,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
             icon={b.icon}
             onSend={sendCommand}
             shortcut={b.shortcut}
-            size={{ xs: 44, sm: 52 }}
+            size={{ xs: 48, sm: 52 }}
             currentPlatform={currentPlatform}
             styleTokens={styleTokens}
           />
@@ -874,7 +975,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
               label={b.label}
               icon={b.icon}
               onSend={sendCommand}
-              size={{ xs: 44, sm: 52 }}
+              size={{ xs: 48, sm: 52 }}
               color="error"
               styleTokens={styleTokens}
             />
@@ -887,7 +988,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
         </Typography>
       )}
 
-      {mediaModalOpen && (
+      {mediaModalMounted && (
         <Suspense fallback={null}>
           <LazyMediaPlayerModal
             open={mediaModalOpen}
@@ -897,7 +998,16 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
         </Suspense>
       )}
 
-      <Snackbar open={!!feedback} autoHideDuration={3000} onClose={() => setFeedback(null)} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }} >
+      {/* Portaled out of the card: the Glass style's backdrop-filter would otherwise make the card
+          the containing block and clip the message. Raised above the bottom nav on phones. */}
+      <Portal>
+      <Snackbar
+        open={!!feedback}
+        autoHideDuration={4000}
+        onClose={() => setFeedback(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        sx={{ bottom: { xs: 'calc(88px + env(safe-area-inset-bottom))', md: 24 } }}
+      >
         <Alert
           onClose={() => setFeedback(null)}
           severity={feedback?.severity}
@@ -921,6 +1031,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
           {feedback?.message}
         </Alert>
       </Snackbar>
+      </Portal>
     </Paper>
   );
 };

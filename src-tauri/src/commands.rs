@@ -2,7 +2,9 @@ use base64::{engine::general_purpose, Engine as _};
 use once_cell::sync::Lazy;
 use reqwest::Client;
 use roku::Device;
-use crate::background::{cache_app_list_bg, AppCache as CacheApp, get_icon_bg, cache_icon_bg};
+use crate::background::{
+    cache_app_list_bg, cache_icon_bg, delete_device_bg, get_icon_bg, AppCache as CacheApp,
+};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, sync::Mutex, time::Duration};
 use tauri::AppHandle;
@@ -18,8 +20,50 @@ pub static HTTP_CLIENT: Lazy<Client> = Lazy::new(|| {
         .unwrap_or_else(|_| Client::new())
 });
 
-/// Basic in-memory cache for app icons.
+/// Short-timeout client for probing hosts during the subnet sweep.
+static PROBE_CLIENT: Lazy<Client> = Lazy::new(|| {
+    Client::builder()
+        .timeout(Duration::from_millis(1000))
+        .connect_timeout(Duration::from_millis(500))
+        .build()
+        .unwrap_or_else(|_| Client::new())
+});
+
+/// Basic in-memory cache for app icons, keyed by icon URL.
 static ICON_CACHE: Lazy<Mutex<HashMap<String, String>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+
+fn icon_cache() -> std::sync::MutexGuard<'static, HashMap<String, String>> {
+    ICON_CACHE.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Builds `http://{ip}:{port}/{segments...}`, percent-encoding each segment.
+fn ecp_url(ip: &str, port: u16, segments: &[&str]) -> Result<Url, String> {
+    let mut url =
+        Url::parse(&format!("http://{}:{}/", ip, port)).map_err(|e| format!("Invalid URL: {}", e))?;
+    url.path_segments_mut()
+        .map_err(|_| "Invalid URL".to_string())?
+        .pop_if_empty()
+        .extend(segments);
+    Ok(url)
+}
+
+/// Forgets one device: its cache rows, cached icons, and discovery tracking. It will be listed
+/// again if a later scan finds it.
+pub async fn forget_device_impl(hardware_id: String) -> Result<(), String> {
+    let ip = delete_device_bg(hardware_id.clone()).await?;
+    crate::background_discovery::forget_last_seen(&hardware_id);
+    if let Some(ip) = ip {
+        let prefix = format!("http://{}:", ip);
+        icon_cache().retain(|url, _| !url.starts_with(&prefix));
+    }
+    Ok(())
+}
+
+/// Drops every in-memory cache. Used alongside clearing the database.
+pub fn clear_memory_caches() {
+    icon_cache().clear();
+    crate::background_discovery::clear_last_seen();
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct RokuDevice {
@@ -168,69 +212,54 @@ pub async fn check_device_connectivity_impl(ip: String, port: u16) -> Result<boo
     }
 }
 
-/// Get media player status with detailed logging
+/// Get media player status.
 pub async fn get_media_player_impl(ip: String, port: u16) -> Result<MediaPlayerInfo, String> {
-    log::info!("Fetching media player status from {}:{}", ip, port);
-    
     let url = format!("http://{}:{}/query/media-player", ip, port);
-    
+
     let response = HTTP_CLIENT
         .get(&url)
         .timeout(Duration::from_secs(5))
         .send()
         .await
         .map_err(|e| format!("Network error: {}", e))?;
-    
+
     let status = response.status();
     let body = response.text().await.map_err(|e| format!("Failed to read response: {}", e))?;
-    
-    log::info!("Media player response status: {}", status);
-    log::debug!("Media player raw XML response:\n{}", body);
-    
+
     if !status.is_success() {
         return Err(format!("HTTP {} from Roku", status));
     }
-    
-    let base_url = format!("http://{}:{}", ip, port);
-    let url = Url::parse(&base_url).map_err(|e| format!("Invalid URL: {}", e))?;
-    let device = Device::new(url);
 
-    match device.media_player().await {
-        Ok(media_player) => {
-            log::info!("Successfully parsed media player data");
-            Ok(MediaPlayerInfo {
-                state: media_player.state,
-                error: media_player.error,
-                plugin: media_player.plugin.map(|p| PluginInfo {
-                    id: p.id,
-                    name: p.name,
-                    bandwidth: p.bandwidth,
-                }),
-                format: media_player.format.map(|f| FormatInfo {
-                    audio: f.audio,
-                    captions: f.captions,
-                    container: f.container,
-                    drm: f.drm,
-                    video: f.video,
-                    video_res: f.video_res,
-                }),
-                position: media_player.position,
-                duration: media_player.duration,
-                is_live: media_player.is_live,
-                runtime: media_player.runtime,
-            })
-        }
-        Err(err) => {            
-            log::warn!("Roku crate media-player parsing failed: {}", err);
-            log::info!("Attempting manual XML parsing as fallback");
+    match roku::parse_media_player(&body) {
+        Ok(media_player) => Ok(MediaPlayerInfo {
+            state: media_player.state,
+            error: media_player.error,
+            plugin: media_player.plugin.map(|p| PluginInfo {
+                id: p.id,
+                name: p.name,
+                bandwidth: p.bandwidth,
+            }),
+            format: media_player.format.map(|f| FormatInfo {
+                audio: f.audio,
+                captions: f.captions,
+                container: f.container,
+                drm: f.drm,
+                video: f.video,
+                video_res: f.video_res,
+            }),
+            position: media_player.position,
+            duration: media_player.duration,
+            is_live: media_player.is_live,
+            runtime: media_player.runtime,
+        }),
+        Err(err) => {
+            log::debug!("media-player parse failed ({}), using the simple parser", err);
             parse_media_player_simple(&body)
         }
     }
 }
 
 fn parse_media_player_simple(xml: &str) -> Result<MediaPlayerInfo, String> {
-    log::info!("Using simple XML parser for media-player response");
-    
     let state = if let Some(start) = xml.find("state=\"") {
         let start = start + 7;
         if let Some(end) = xml[start..].find('"') {
@@ -342,37 +371,21 @@ fn extract_element_text(xml: &str, element: &str) -> Option<String> {
     None
 }
 
-/// Discover Roku devices via SSDP with fallback to network scan.
+/// Discover Roku devices via SSDP; the discovery cycle itself falls back to a subnet sweep.
 pub async fn discover_roku_devices_impl(app: &AppHandle) -> Result<Vec<RokuDevice>, String> {
     use crate::background_discovery::run_discovery_once;
-    
-    let ssdp_result = run_discovery_once(app).await;
-    
-    let mut devices: Vec<RokuDevice> = match ssdp_result {
-        Ok(discovered) => discovered
-            .into_iter()
-            .map(|d| RokuDevice { 
-                name: d.name, 
-                ip: d.ip, 
-                port: d.port, 
-                url: d.url,
-                hardware_id: d.hardware_id,
-            })
-            .collect(),
-        Err(e) => {
-            log::warn!("SSDP discovery failed: {}, trying fallback", e);
-            Vec::new()
-        }
-    };
 
-    if devices.is_empty() {
-        log::info!("SSDP found no devices, attempting network scan fallback");
-        if let Ok(fallback_devices) = scan_network_for_roku().await {
-            devices = fallback_devices;
-        }
-    }
-
-    Ok(devices)
+    let discovered = run_discovery_once(app).await?;
+    Ok(discovered
+        .into_iter()
+        .map(|d| RokuDevice {
+            name: d.name,
+            ip: d.ip,
+            port: d.port,
+            url: d.url,
+            hardware_id: d.hardware_id,
+        })
+        .collect())
 }
 
 /// Fallback: Scan common local network ranges for Roku devices
@@ -430,14 +443,8 @@ pub async fn scan_network_for_roku() -> Result<Vec<RokuDevice>, String> {
 }
 
 async fn check_roku_device_with_hardware_id(ip: &str) -> Option<RokuDevice> {
-    let client = Client::builder()
-        .timeout(Duration::from_millis(1000))
-        .connect_timeout(Duration::from_millis(500))
-        .build()
-        .ok()?;
-    
     let test_url = format!("http://{}:8060/", ip);
-    let response = client.get(&test_url).send().await.ok()?;
+    let response = PROBE_CLIENT.get(&test_url).send().await.ok()?;
     
     if !response.status().is_success() {
         return None;
@@ -521,7 +528,9 @@ pub async fn list_roku_apps_impl(ip: String, port: u16) -> Result<Vec<RokuApp>, 
                 version: a.version.clone() 
             })
             .collect();
-        let _ = cache_app_list_bg(ip.clone(), cache_list).await;
+        if let Err(e) = cache_app_list_bg(ip.clone(), cache_list).await {
+            log::warn!("Failed to cache app list for {}: {}", ip, e);
+        }
     }
 
     Ok(apps)
@@ -575,10 +584,10 @@ pub async fn send_roku_command_impl(
     port: u16,
     command: String,
 ) -> Result<String, String> {
-    let keypress_url = format!("http://{}:{}/keypress/{}", ip, port, command);
-    
+    let keypress_url = ecp_url(&ip, port, &["keypress", &command])?;
+
     let response = match HTTP_CLIENT
-        .post(&keypress_url)
+        .post(keypress_url)
         .timeout(Duration::from_secs(5))
         .send()
         .await 
@@ -606,10 +615,10 @@ pub async fn send_roku_command_impl(
 
 /// Launch an app using HTTP POST request.
 pub async fn launch_roku_app_impl(ip: String, port: u16, app_id: String) -> Result<String, String> {
-    let endpoint = format!("http://{}:{}/launch/{}", ip, port, app_id);
+    let endpoint = ecp_url(&ip, port, &["launch", &app_id])?;
 
     let resp = HTTP_CLIENT
-        .post(&endpoint)
+        .post(endpoint)
         .send()
         .await
         .map_err(|e| format!("Network error: {}", e))?;
@@ -632,7 +641,13 @@ pub async fn get_active_app_impl(ip: String, port: u16) -> Result<ActiveAppInfo,
     let url = Url::parse(&base_url).map_err(|e| e.to_string())?;
     let device = Device::new(url);
 
-    let active_app = device.active_app().await.map_err(|e| e.to_string())?;
+    let active_app = device.active_app().await.map_err(|e| match &e {
+        roku::Error::Request(req) => match req.status() {
+            Some(status) => format!("HTTP {} from Roku", status),
+            None => format!("Network error: {}", req),
+        },
+        _ => e.to_string(),
+    })?;
 
     let app = active_app.app;
     let app_id = app.id.unwrap_or_else(|| "roku".to_string());
@@ -648,12 +663,12 @@ pub async fn get_active_app_impl(ip: String, port: u16) -> Result<ActiveAppInfo,
 pub async fn get_app_icon_impl(ip: String, port: u16, app_id: String) -> Result<String, String> {
     let url = format!("http://{}:{}/query/icon/{}", ip, port, app_id);
 
-    if let Some(cached) = { ICON_CACHE.lock().unwrap().get(&url).cloned() } {
+    if let Some(cached) = { icon_cache().get(&url).cloned() } {
         return Ok(cached);
     }
 
     if let Ok(Some(db_icon)) = get_icon_bg(ip.clone(), app_id.clone()).await {
-        ICON_CACHE.lock().unwrap().insert(url.clone(), db_icon.clone());
+        icon_cache().insert(url.clone(), db_icon.clone());
         return Ok(db_icon);
     }
 
@@ -672,8 +687,10 @@ pub async fn get_app_icon_impl(ip: String, port: u16, app_id: String) -> Result<
     let mime_type = "image/png";
     let data_url = format!("data:{};base64,{}", mime_type, base64_icon);
 
-    let _ = cache_icon_bg(ip, app_id, data_url.clone()).await;
-    ICON_CACHE.lock().unwrap().insert(url, data_url.clone());
+    if let Err(e) = cache_icon_bg(ip, app_id, data_url.clone()).await {
+        log::warn!("Failed to cache icon: {}", e);
+    }
+    icon_cache().insert(url, data_url.clone());
 
     Ok(data_url)
 }
@@ -695,11 +712,9 @@ pub async fn test_network_connectivity() -> Result<String, String> {
     
     match tokio::net::UdpSocket::bind("0.0.0.0:0").await {
         Ok(socket) => {
-            let local_addr = socket.local_addr().unwrap();
-            log::info!("Successfully bound UDP socket to: {}", local_addr);
-            
-            let multicast_addr = "239.255.255.250:1900".parse::<std::net::SocketAddr>().unwrap();
-            match socket.send_to(b"TEST", multicast_addr).await {
+            log::info!("Successfully bound UDP socket to: {:?}", socket.local_addr());
+
+            match socket.send_to(b"TEST", "239.255.255.250:1900").await {
                 Ok(bytes) => log::info!("Sent {} bytes to multicast address", bytes),
                 Err(e) => log::error!("Failed to send to multicast: {}", e),
             }
@@ -710,4 +725,21 @@ pub async fn test_network_connectivity() -> Result<String, String> {
     }
     
     Ok("Network connectivity test completed - check logs".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ecp_url_percent_encodes_segments() {
+        let url = ecp_url("10.0.0.2", 8060, &["keypress", "Lit_a/b c?"]).unwrap();
+        assert_eq!(url.as_str(), "http://10.0.0.2:8060/keypress/Lit_a%2Fb%20c%3F");
+    }
+
+    #[test]
+    fn ecp_url_leaves_plain_keys_alone() {
+        let url = ecp_url("10.0.0.2", 8060, &["keypress", "VolumeUp"]).unwrap();
+        assert_eq!(url.as_str(), "http://10.0.0.2:8060/keypress/VolumeUp");
+    }
 }

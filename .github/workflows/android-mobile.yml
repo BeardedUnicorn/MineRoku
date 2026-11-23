@@ -27,6 +27,10 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v5
 
+      # The app compiles against Android 17, which runner images may not ship yet.
+      - name: Install Android 17 SDK platform
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37.0"
+
       # settings.gradle applies tauri.settings.gradle and MainActivity extends the
       # generated TauriActivity. Both are gitignored and written by Tauri's build
       # scripts, so run those with the variables `tauri android build` would set.

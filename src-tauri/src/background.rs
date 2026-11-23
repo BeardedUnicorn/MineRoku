@@ -35,6 +35,10 @@ pub enum BackgroundTask {
         device_ip: String,
         response: oneshot::Sender<SqliteResult<Vec<AppCache>>>,
     },
+    DeleteDevice {
+        hardware_id: String,
+        response: oneshot::Sender<SqliteResult<Option<String>>>,
+    },
     ClearAllData {
         response: oneshot::Sender<SqliteResult<()>>,
     },
@@ -236,6 +240,41 @@ impl DatabaseManager {
         apps.collect()
     }
 
+    /// Removes a device and the app/icon caches stored under its IP. Returns that IP, or `None`
+    /// when the device was not in the cache.
+    fn delete_device(&self, hardware_id: &str) -> SqliteResult<Option<String>> {
+        let conn = self.conn.lock().unwrap();
+        let tx = conn.unchecked_transaction()?;
+
+        let ip = match tx.query_row(
+            "SELECT ip FROM devices WHERE hardware_id = ?1",
+            params![hardware_id],
+            |row| row.get::<_, String>(0),
+        ) {
+            Ok(ip) => Some(ip),
+            Err(rusqlite::Error::QueryReturnedNoRows) => None,
+            Err(e) => return Err(e),
+        };
+
+        tx.execute("DELETE FROM devices WHERE hardware_id = ?1", params![hardware_id])?;
+
+        if let Some(ip) = &ip {
+            // Apps and icons are keyed by IP. Keep them if another known device now has it.
+            let still_used: i64 = tx.query_row(
+                "SELECT COUNT(*) FROM devices WHERE ip = ?1",
+                params![ip],
+                |row| row.get(0),
+            )?;
+            if still_used == 0 {
+                tx.execute("DELETE FROM apps WHERE device_ip = ?1", params![ip])?;
+                tx.execute("DELETE FROM icons WHERE device_ip = ?1", params![ip])?;
+            }
+        }
+
+        tx.commit()?;
+        Ok(ip)
+    }
+
     fn clear_all_data(&self) -> SqliteResult<()> {
         let conn = self.conn.lock().unwrap();
         
@@ -259,12 +298,12 @@ pub fn init_background_tasks(db_path: String) -> Result<(), Box<dyn std::error::
         let db_manager = match DatabaseManager::new(&db_path) {
             Ok(manager) => manager,
             Err(e) => {
-                eprintln!("Failed to initialize database: {}", e);
+                log::error!("Failed to initialize database at {}: {}", db_path, e);
                 return;
             }
         };
 
-        println!("Background task system initialized with database at: {}", db_path);
+        log::info!("Background task system initialized with database at: {}", db_path);
 
         while let Some(task) = rx.recv().await {
             match task {
@@ -314,6 +353,14 @@ pub fn init_background_tasks(db_path: String) -> Result<(), Box<dyn std::error::
                     response,
                 } => {
                     let result = db_manager.get_apps(&device_ip);
+                    let _ = response.send(result);
+                }
+
+                BackgroundTask::DeleteDevice {
+                    hardware_id,
+                    response,
+                } => {
+                    let result = db_manager.delete_device(&hardware_id);
                     let _ = response.send(result);
                 }
 
@@ -409,4 +456,82 @@ pub async fn clear_all_data_bg() -> Result<(), String> {
         .await
         .map_err(|e| e.to_string())?
         .map_err(|e| e.to_string())
+}
+
+/// Deletes one device and its cached apps and icons. Returns the IP it was stored under.
+pub async fn delete_device_bg(hardware_id: String) -> Result<Option<String>, String> {
+    execute_task(|response| BackgroundTask::DeleteDevice {
+        hardware_id,
+        response,
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn device(hardware_id: &str, ip: &str) -> DeviceCache {
+        DeviceCache {
+            name: format!("Roku {hardware_id}"),
+            ip: ip.to_string(),
+            port: 8060,
+            url: format!("http://{ip}:8060"),
+            hardware_id: hardware_id.to_string(),
+            last_seen: 1,
+        }
+    }
+
+    fn app(id: &str) -> AppCache {
+        AppCache {
+            id: id.to_string(),
+            name: format!("App {id}"),
+            version: "1.0".to_string(),
+        }
+    }
+
+    #[test]
+    fn delete_device_removes_only_that_device_and_its_caches() {
+        let db = DatabaseManager::new(":memory:").unwrap();
+        db.cache_device(&device("roku:A", "10.0.0.2")).unwrap();
+        db.cache_device(&device("roku:B", "10.0.0.3")).unwrap();
+        db.cache_app_list("10.0.0.2", &[app("12")]).unwrap();
+        db.cache_app_list("10.0.0.3", &[app("13")]).unwrap();
+        db.cache_icon("10.0.0.2", "12", "data:a").unwrap();
+        db.cache_icon("10.0.0.3", "13", "data:b").unwrap();
+
+        assert_eq!(db.delete_device("roku:A").unwrap().as_deref(), Some("10.0.0.2"));
+
+        let remaining = db.get_devices().unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].hardware_id, "roku:B");
+        assert!(db.get_apps("10.0.0.2").unwrap().is_empty());
+        assert_eq!(db.get_icon("10.0.0.2", "12").unwrap(), None);
+        assert_eq!(db.get_apps("10.0.0.3").unwrap().len(), 1);
+        assert_eq!(db.get_icon("10.0.0.3", "13").unwrap().as_deref(), Some("data:b"));
+    }
+
+    #[test]
+    fn delete_device_keeps_caches_when_another_device_has_the_ip() {
+        let db = DatabaseManager::new(":memory:").unwrap();
+        db.cache_device(&device("roku:legacy", "10.0.0.2")).unwrap();
+        db.cache_device(&device("roku:real", "10.0.0.2")).unwrap();
+        db.cache_app_list("10.0.0.2", &[app("12")]).unwrap();
+
+        db.delete_device("roku:legacy").unwrap();
+
+        assert_eq!(db.get_devices().unwrap().len(), 1);
+        assert_eq!(db.get_apps("10.0.0.2").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn delete_device_is_a_no_op_for_an_unknown_device() {
+        let db = DatabaseManager::new(":memory:").unwrap();
+        db.cache_device(&device("roku:A", "10.0.0.2")).unwrap();
+
+        assert_eq!(db.delete_device("roku:missing").unwrap(), None);
+        assert_eq!(db.get_devices().unwrap().len(), 1);
+    }
 }

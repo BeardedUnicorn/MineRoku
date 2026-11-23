@@ -18,13 +18,13 @@ val tauriProperties = Properties().apply {
 }
 
 android {
-    compileSdk = 36
+    compileSdk = 37
     namespace = "com.rokucontroller.remote"
 
     defaultConfig {
         applicationId = "com.rokucontroller.remote"
         minSdk = 24
-        targetSdk = 36
+        targetSdk = 37
         versionCode = tauriProperties
             .getProperty("tauri.android.versionCode", "1")
             .toInt()

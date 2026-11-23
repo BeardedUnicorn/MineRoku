@@ -118,6 +118,12 @@ const AppIcon: React.FC<{ device: RokuDevice; appId: string; appName: string; si
     );
 };
 
+const errorText = (error: unknown): string => {
+    if (typeof error === 'string') return error;
+    if (error instanceof Error) return error.message;
+    return String(error);
+};
+
 const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
     const [apps, setApps] = useState<RokuApp[]>([]);
     const [isLoading, setIsLoading] = useState(false);
@@ -129,6 +135,19 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
     
     const containerRef = useRef<HTMLDivElement>(null);
     const gridRef = useRef<HTMLDivElement>(null);
+    const retryTimerRef = useRef<number | undefined>(undefined);
+    const mountedRef = useRef(true);
+    const isConnected = !device.status || device.status === 'connected';
+    const isConnectedRef = useRef(isConnected);
+    isConnectedRef.current = isConnected;
+
+    useEffect(() => {
+        mountedRef.current = true;
+        return () => {
+            mountedRef.current = false;
+            window.clearTimeout(retryTimerRef.current);
+        };
+    }, []);
 
     // Use hardware_id for favorites
     const favoriteApps = useAppStore((state) => state.favoriteApps[device.hardware_id] ?? NO_FAVORITES);
@@ -191,6 +210,8 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
         return calculated;
     }, [favoriteAppDetails.length]);
 
+    const hasGrid = apps.length > 0;
+
     // Set up resize observer for responsive pagination
     useEffect(() => {
         const updateItemsPerPage = () => {
@@ -231,7 +252,8 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
             window.removeEventListener('resize', debouncedUpdate);
             resizeObserver.disconnect();
         };
-    }, [calculateItemsPerPage]);
+        // hasGrid: the grid only exists once apps are shown, so observe it when it appears.
+    }, [calculateItemsPerPage, hasGrid]);
 
     // Recalculate when favorites change (affects available height)
     useEffect(() => {
@@ -239,41 +261,49 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
         setItemsPerPage(newItemsPerPage);
     }, [favoriteAppDetails.length, calculateItemsPerPage]);
 
+    // Reads connectivity from a ref so a status flip does not rebuild this callback and trigger
+    // a refetch; the page the user is on is left alone.
     const fetchApps = useCallback(async (retryCount = 0) => {
+        window.clearTimeout(retryTimerRef.current);
+        if (!isConnectedRef.current) {
+            return;
+        }
+
         setIsLoading(true);
-        setCurrentPage(1);
+        // The list stays in its loading state while a retry is pending.
+        const retryLater = () => {
+            retryTimerRef.current = window.setTimeout(() => {
+                void fetchApps(1);
+            }, 2000);
+        };
+
         try {
-            if (device.status && device.status !== 'connected') {
+            const rokuApps = await listRokuApps(device.ip, device.port);
+            if (!mountedRef.current) {
                 return;
             }
-
-            const rokuApps = await listRokuApps(device.ip, device.port);
             if (rokuApps.length === 0 && retryCount === 0) {
-                console.log('No apps found, retrying in 2 seconds...');
-                window.setTimeout(() => {
-                    void fetchApps(1);
-                }, 2000);
+                retryLater();
                 return;
             }
 
             setApps([...rokuApps].sort((a, b) => a.name.localeCompare(b.name)));
         } catch (error) {
+            if (!mountedRef.current) {
+                return;
+            }
             console.error('Error fetching apps:', error);
-            const errorMessage = typeof error === 'string' ? error : 'An unknown error occurred.';
+            const errorMessage = errorText(error);
 
             if (errorMessage.includes('parse') && retryCount === 0) {
-                console.log('Parse error encountered, retrying in 2 seconds...');
-                window.setTimeout(() => {
-                    void fetchApps(1);
-                }, 2000);
+                retryLater();
                 return;
             }
 
             setFeedback({ message: `Error fetching apps: ${errorMessage}`, severity: 'error' });
-        } finally {
-            setIsLoading(false);
         }
-    }, [device.ip, device.port, device.status]);
+        setIsLoading(false);
+    }, [device.ip, device.port]);
 
     const launchApp = async (appId: string, appName: string) => {
         if (device.status && device.status !== 'connected') {
@@ -286,8 +316,7 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
             setFeedback({ message: `Launched "${appName}"`, severity: 'success' });
         } catch (error) {
             console.error(`Error launching app:`, error);
-            const errorMessage = typeof error === 'string' ? error : 'An unknown error occurred.';
-            setFeedback({ message: `Error launching "${appName}": ${errorMessage}`, severity: 'error' });
+            setFeedback({ message: `Error launching "${appName}": ${errorText(error)}`, severity: 'error' });
         } finally {
             setIsLaunching(null);
         }
@@ -314,40 +343,34 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
         }
     }, [itemsPerPage, currentPage, pageCount]);
 
+    // Cached list first, for an instant (and offline) view. It only fills an empty list: it never
+    // replaces or blanks what is already shown.
     useEffect(() => {
         let cancelled = false;
-        let liveSettled = false;
 
-        const livePromise =
-            !device.status || device.status === 'connected'
-                ? fetchApps().finally(() => {
-                      liveSettled = true;
-                  })
-                : null;
-
-        const loadCached = async () => {
-            try {
-                const cached = await getCachedApps(device.ip);
-                if (cancelled || liveSettled) {
+        void getCachedApps(device.ip)
+            .then((cached) => {
+                if (cancelled || cached.length === 0) {
                     return;
                 }
-                if (cached.length > 0) {
-                    setApps([...cached].sort((a, b) => a.name.localeCompare(b.name)));
-                } else {
-                    setApps([]);
-                }
-            } catch {
-                // Non-fatal; fall back to live fetch.
-            }
-        };
-
-        void loadCached();
-        void livePromise;
+                const sorted = [...cached].sort((a, b) => a.name.localeCompare(b.name));
+                setApps((current) => (current.length > 0 ? current : sorted));
+            })
+            .catch(() => {
+                // Non-fatal; the live fetch still runs.
+            });
 
         return () => {
             cancelled = true;
         };
-    }, [device.ip, device.status, fetchApps]);
+    }, [device.ip]);
+
+    // Live list on mount and whenever the device comes back online.
+    useEffect(() => {
+        if (isConnected) {
+            void fetchApps();
+        }
+    }, [isConnected, fetchApps]);
 
     const paginatedApps = useMemo(
         () => filteredApps.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage),
@@ -415,14 +438,14 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
                 paddingTop: 1
             }}>
                 <Typography variant="h6">All Applications ({filteredApps.length})</Typography>
-                <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+                <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap', flexGrow: 1, justifyContent: 'flex-end' }}>
                     <TextField
                         label="Search Apps"
                         variant="outlined"
                         size="small"
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
-                        sx={{ minWidth: '250px' }}
+                        sx={{ flex: '1 1 180px', maxWidth: 320 }}
                         slotProps={{
                             input: {
                                 startAdornment: (
@@ -440,8 +463,8 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
             </Box>
 
             <Box sx={{ flexGrow: 1, minHeight: 0, overflow: 'auto' }}>
-                {isLoading ? (
-                    <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}><CircularProgress /></Box>
+                {isLoading && apps.length === 0 ? (
+                    <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }} role="status" aria-label="Loading apps"><CircularProgress /></Box>
                 ) : filteredApps.length > 0 ? (
                     <>
                         <Box 
@@ -461,7 +484,6 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
                                                 {app.name}
                                             </Typography>
                                         </Tooltip>
-                                        <Typography variant="caption" color="textSecondary">ID: {app.id}</Typography>
                                         <Box sx={{ mt: 'auto', pt: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
                                             <Button
                                                 fullWidth
@@ -478,6 +500,7 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
                                                         ? `Remove ${app.name} from Favorites`
                                                         : `Add ${app.name} to Favorites`}
                                                     onClick={() => toggleFavoriteApp(device.hardware_id, app.id)}
+                                                    sx={{ width: 48, height: 48, flexShrink: 0 }}
                                                 >
                                                     {favoriteAppIds.has(app.id) ? <StarIcon color="primary" /> : <StarBorderIcon />}
                                                 </IconButton>
@@ -496,6 +519,7 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
                                     color="primary"
                                     showFirstButton
                                     showLastButton
+                                    sx={{ '& .MuiPaginationItem-root': { minWidth: 44, height: 44 } }}
                                 />
                             </Box>
                         )}
@@ -503,9 +527,13 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
                 ) : (
                     <Box sx={{ textAlign: 'center', p: 4, mt: 4, border: '1px dashed', borderColor: 'divider', borderRadius: 2 }}>
                         <SearchIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
-                        <Typography variant="h6" color="textSecondary">No matching apps found</Typography>
+                        <Typography variant="h6" color="textSecondary">
+                            {apps.length === 0 && !isConnected ? 'Device offline' : 'No matching apps found'}
+                        </Typography>
                         <Typography variant="body1" color="textSecondary" sx={{ mt: 1 }}>
-                            Try clearing your search or refreshing the list.
+                            {apps.length === 0 && !isConnected
+                                ? 'Apps will load when the device is reachable again.'
+                                : 'Try clearing your search or refreshing the list.'}
                         </Typography>
                     </Box>
                 )}
@@ -516,6 +544,7 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
                 autoHideDuration={4000} 
                 onClose={() => setFeedback(null)} 
                 anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+                sx={{ bottom: { xs: 'calc(88px + env(safe-area-inset-bottom))', md: 24 } }}
             >
                 <Alert 
                     onClose={() => setFeedback(null)} 

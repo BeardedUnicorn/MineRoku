@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Cleartext stays off for the WebView and Java networking. Roku ECP is plain HTTP, but it is
+     sent from native code, which this policy does not govern. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+</network-security-config>

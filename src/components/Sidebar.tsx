@@ -4,7 +4,7 @@ import { remoteStylePresets, type RemoteStylePreset, useAppStore, RokuDevice } f
 import { iconCache } from '../iconCache';
 import { useShallow } from 'zustand/react/shallow';
 import {
-    Drawer, List, ListItemButton, ListItemText,
+    Alert, Drawer, List, ListItem, ListItemButton, ListItemText,
     Typography, Box, IconButton, Divider, CircularProgress, Tooltip, useTheme, useMediaQuery,
     Dialog, DialogTitle, DialogContent, DialogActions, FormControlLabel, Switch, Stack, Button,
     FormControl, InputLabel, Select, MenuItem
@@ -13,8 +13,10 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import SettingsIcon from '@mui/icons-material/Settings';
 import InfoIcon from '@mui/icons-material/Info';
 import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import { usePlatform } from '../hooks/usePlatform';
-import { clearAllData, restartApp } from '../services/rokuClient';
+import { useBackHandler } from '../hooks/useBackHandler';
+import { clearAllData, forgetDevice, hideMediaNotification, restartApp } from '../services/rokuClient';
 import { remoteStyleLabels } from './remoteStyleTokens';
 
 interface SidebarProps {
@@ -36,12 +38,23 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, scanForDevices, isS
     const remoteStyle = useAppStore((s) => s.remoteStyle);
     const setRemoteStyle = useAppStore((s) => s.setRemoteStyle);
     const resetState = useAppStore((s) => s.resetState);
+    const removeDevice = useAppStore((s) => s.removeDevice);
     const theme = useTheme();
     const isMobile = useMediaQuery(theme.breakpoints.down('md'));
     const [settingsOpen, setSettingsOpen] = React.useState(false);
     const [confirmDeleteOpen, setConfirmDeleteOpen] = React.useState(false);
     const [isDeleting, setIsDeleting] = React.useState(false);
+    const [deleteError, setDeleteError] = React.useState<string | null>(null);
+    const [deviceToForget, setDeviceToForget] = React.useState<RokuDevice | null>(null);
+    const [isForgetting, setIsForgetting] = React.useState(false);
+    const [forgetError, setForgetError] = React.useState<string | null>(null);
     const currentPlatform = usePlatform();
+    const isMobilePlatform = currentPlatform === 'android' || currentPlatform === 'ios';
+
+    useBackHandler(isMobile && isOpen, onToggle);
+    useBackHandler(settingsOpen, () => setSettingsOpen(false));
+    useBackHandler(confirmDeleteOpen, () => !isDeleting && setConfirmDeleteOpen(false));
+    useBackHandler(deviceToForget !== null, () => !isForgetting && setDeviceToForget(null));
     const visibleDevices = React.useMemo(() => {
         if (showAllDevices) {
             return devices;
@@ -65,18 +78,61 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, scanForDevices, isS
         }
     };
 
+    const handleForgetDevice = async () => {
+        if (!deviceToForget) {
+            return;
+        }
+
+        const device = deviceToForget;
+        setIsForgetting(true);
+        setForgetError(null);
+        try {
+            // Backend first: the device list is re-seeded from its cache on every launch.
+            await forgetDevice(device.hardware_id);
+        } catch (error) {
+            console.error('Failed to forget device:', error);
+            setForgetError(`Could not forget this device: ${String(error)}`);
+            setIsForgetting(false);
+            return;
+        }
+
+        const wasSelected = useAppStore.getState().selectedDevice?.hardware_id === device.hardware_id;
+        removeDevice(device.hardware_id);
+
+        const iconKeyPrefix = `${device.ip}:${device.port}:`;
+        for (const key of Array.from(iconCache.keys())) {
+            if (key.startsWith(iconKeyPrefix)) {
+                iconCache.delete(key);
+            }
+        }
+
+        if (wasSelected) {
+            void hideMediaNotification().catch(() => undefined);
+        }
+
+        setIsForgetting(false);
+        setDeviceToForget(null);
+    };
+
     const handleDeleteAllData = async () => {
         setIsDeleting(true);
+        setDeleteError(null);
         try {
-            // Clear backend database
+            // Clear backend database. If this fails the devices would simply come back from
+            // the backend cache on the next launch, so stop and say so.
             await clearAllData();
         } catch (error) {
             console.error('Failed to delete data:', error);
+            setDeleteError(`Could not delete saved data: ${String(error)}`);
+            setIsDeleting(false);
+            return;
         }
-        
+
+        void hideMediaNotification().catch(() => undefined);
+
         // Clear frontend localStorage
         localStorage.removeItem('roku-remote-storage');
-        
+
         // Clear any other localStorage items that might exist
         const keysToRemove: string[] = [];
         for (let i = 0; i < localStorage.length; i++) {
@@ -93,7 +149,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, scanForDevices, isS
         setConfirmDeleteOpen(false);
         setSettingsOpen(false);
 
-        if (currentPlatform === 'android' || currentPlatform === 'ios') {
+        if (isMobilePlatform) {
             setIsDeleting(false);
             return;
         }
@@ -143,37 +199,65 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, scanForDevices, isS
             <Divider />
             <Box sx={{ flexGrow: 1, overflowY: 'auto' }}>
                 <List>
-                    {visibleDevices.map((device: RokuDevice) => (
-                        <ListItemButton
-                            key={device.hardware_id}
-                            selected={selectedDevice?.hardware_id === device.hardware_id}
-                            onClick={() => handleDeviceSelect(device)}
-                        >
-                            <ListItemText 
-                                primary={device.name} 
-                                secondary={device.ip}
-                                slotProps={{
-                                    secondary: {
-                                        sx: {
-                                            fontSize: '0.75rem',
-                                            opacity: device.status === 'connected' ? 1 : 0.6
-                                        }
-                                    }
-                                }}
-                            />
-                            <Tooltip title={device.status === 'connected' ? 'Online' : 'Offline'}>
-                                <Box
-                                    aria-label={device.status === 'connected' ? 'Device online' : 'Device offline'}
-                                    sx={{
-                                        width: 10,
-                                        height: 10,
-                                        borderRadius: '50%',
-                                        bgcolor: device.status === 'connected' ? 'success.main' : 'text.disabled',
-                                    }}
-                                />
-                            </Tooltip>
-                        </ListItemButton>
-                    ))}
+                    {visibleDevices.map((device: RokuDevice) => {
+                        const isSelected = selectedDevice?.hardware_id === device.hardware_id;
+                        const isOnline = device.status === 'connected';
+                        return (
+                            <ListItem
+                                key={device.hardware_id}
+                                disablePadding
+                                secondaryAction={
+                                    <Tooltip title="Forget device">
+                                        <IconButton
+                                            edge="end"
+                                            aria-label={`Forget ${device.name}`}
+                                            onClick={() => {
+                                                setForgetError(null);
+                                                setDeviceToForget(device);
+                                            }}
+                                            sx={{ width: 48, height: 48, color: 'text.secondary' }}
+                                        >
+                                            <DeleteOutlineIcon fontSize="small" />
+                                        </IconButton>
+                                    </Tooltip>
+                                }
+                            >
+                                <ListItemButton
+                                    selected={isSelected}
+                                    aria-current={isSelected ? 'true' : undefined}
+                                    onClick={() => handleDeviceSelect(device)}
+                                    sx={{ minHeight: 56, pr: 8 }}
+                                >
+                                    <ListItemText
+                                        primary={device.name}
+                                        secondary={device.ip}
+                                        slotProps={{
+                                            primary: { sx: { overflowWrap: 'anywhere' } },
+                                            secondary: {
+                                                sx: {
+                                                    fontSize: '0.75rem',
+                                                    opacity: isOnline ? 1 : 0.6
+                                                }
+                                            }
+                                        }}
+                                    />
+                                    <Tooltip title={isOnline ? 'Online' : 'Offline'}>
+                                        <Box
+                                            role="img"
+                                            aria-label={isOnline ? 'Device online' : 'Device offline'}
+                                            sx={{
+                                                width: 10,
+                                                height: 10,
+                                                flexShrink: 0,
+                                                borderRadius: '50%',
+                                                bgcolor: isOnline ? 'success.main' : 'text.disabled',
+                                            }}
+                                        />
+                                    </Tooltip>
+                                </ListItemButton>
+                            </ListItem>
+                        );
+                    })}
                     {!visibleDevices.length && (
                         <Typography variant="body2" color="textSecondary" sx={{ p: 2 }} role="status" aria-live="polite">
                             {isScanning
@@ -191,8 +275,9 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, scanForDevices, isS
                     <span>
                         <IconButton
                             aria-label="Refresh Device List"
-                            onClick={scanForDevices}
+                            onClick={() => void scanForDevices()}
                             disabled={isScanning}
+                            sx={{ width: 48, height: 48 }}
                         >
                             <RefreshIcon />
                         </IconButton>
@@ -202,6 +287,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, scanForDevices, isS
                     <IconButton
                         aria-label="Settings"
                         onClick={() => setSettingsOpen(true)}
+                        sx={{ width: 48, height: 48 }}
                     >
                         <SettingsIcon />
                     </IconButton>
@@ -210,6 +296,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, scanForDevices, isS
                     <IconButton
                         aria-label="About"
                         onClick={() => openUrl('https://github.com/mherold1/roku-controller')}
+                        sx={{ width: 48, height: 48 }}
                     >
                         <InfoIcon />
                     </IconButton>
@@ -272,13 +359,17 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, scanForDevices, isS
                         variant="outlined"
                         color="error"
                         startIcon={<DeleteForeverIcon />}
-                        onClick={() => setConfirmDeleteOpen(true)}
+                        onClick={() => {
+                            setDeleteError(null);
+                            setConfirmDeleteOpen(true);
+                        }}
                         fullWidth
                     >
                         Delete All Data
                     </Button>
                     <Typography variant="caption" color="textSecondary">
-                        This will remove all saved devices, favorites, cached icons, and settings. The app will restart afterward.
+                        This will remove all saved devices, favorites, cached icons, and settings.
+                        {isMobilePlatform ? '' : ' The app will restart afterward.'}
                     </Typography>
                 </Stack>
             </DialogContent>
@@ -307,9 +398,16 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, scanForDevices, isS
                     <li><Typography variant="body2">Cached app icons</Typography></li>
                     <li><Typography variant="body2">All settings and preferences</Typography></li>
                 </Box>
-                <Typography variant="body2" sx={{ mt: 2, fontWeight: 500 }}>
-                    The app will restart after deletion.
-                </Typography>
+                {!isMobilePlatform && (
+                    <Typography variant="body2" sx={{ mt: 2, fontWeight: 500 }}>
+                        The app will restart after deletion.
+                    </Typography>
+                )}
+                {deleteError && (
+                    <Alert severity="error" sx={{ mt: 2 }}>
+                        {deleteError}
+                    </Alert>
+                )}
             </DialogContent>
             <DialogActions>
                 <Button 
@@ -325,7 +423,43 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, scanForDevices, isS
                     disabled={isDeleting}
                     startIcon={isDeleting ? <CircularProgress size={16} color="inherit" /> : <DeleteForeverIcon />}
                 >
-                    {isDeleting ? 'Deleting…' : 'Delete All & Restart'}
+                    {isDeleting ? 'Deleting…' : isMobilePlatform ? 'Delete All' : 'Delete All & Restart'}
+                </Button>
+            </DialogActions>
+        </Dialog>
+
+        {/* Forget Device Dialog */}
+        <Dialog
+            open={deviceToForget !== null}
+            onClose={() => !isForgetting && setDeviceToForget(null)}
+            maxWidth="xs"
+            fullWidth
+        >
+            <DialogTitle>Forget {deviceToForget?.name ?? 'device'}?</DialogTitle>
+            <DialogContent>
+                <Typography variant="body2">
+                    This removes the device from the list along with its favorites and cached
+                    apps and icons. It will be listed again if a later scan finds it on your
+                    network.
+                </Typography>
+                {forgetError && (
+                    <Alert severity="error" sx={{ mt: 2 }}>
+                        {forgetError}
+                    </Alert>
+                )}
+            </DialogContent>
+            <DialogActions>
+                <Button onClick={() => setDeviceToForget(null)} disabled={isForgetting}>
+                    Cancel
+                </Button>
+                <Button
+                    onClick={() => void handleForgetDevice()}
+                    color="error"
+                    variant="contained"
+                    disabled={isForgetting}
+                    startIcon={isForgetting ? <CircularProgress size={16} color="inherit" /> : <DeleteOutlineIcon />}
+                >
+                    {isForgetting ? 'Forgetting…' : 'Forget'}
                 </Button>
             </DialogActions>
         </Dialog>

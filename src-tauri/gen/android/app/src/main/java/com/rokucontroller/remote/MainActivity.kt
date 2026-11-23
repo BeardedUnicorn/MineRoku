@@ -1,12 +1,17 @@
 package com.rokucontroller.remote
 
 import android.Manifest
+import android.app.ActivityManager
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Bundle
+import android.os.IBinder
+import android.view.HapticFeedbackConstants
 import android.view.View
 import androidx.annotation.Keep
 import androidx.core.app.ActivityCompat
@@ -17,25 +22,72 @@ import androidx.core.view.WindowInsetsCompat
 
 class MainActivity : TauriActivity() {
     private var multicastLock: WifiManager.MulticastLock? = null
-    private var wifiLock: WifiManager.WifiLock? = null
+    private var taskWatcherBound = false
+
+    @Volatile
+    private var started = false
+
+    private val taskWatcherConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, service: IBinder?) = Unit
+
+        override fun onServiceDisconnected(name: ComponentName?) = Unit
+    }
 
     companion object {
+        private const val TAG = "RokuRemote"
         private const val DISCOVERY_PERMISSION_REQUEST_CODE = 1001
         private const val NOTIFICATION_PERMISSION_REQUEST_CODE = 1002
+
+        // Android 17. Local network access is a runtime permission for apps targeting it.
+        private const val API_LOCAL_NETWORK_PERMISSION = 37
+        private const val ACCESS_LOCAL_NETWORK = "android.permission.ACCESS_LOCAL_NETWORK"
     }
 
     private external fun nativeOnActivityCreated()
     private external fun nativeOnActivityDestroyed()
+    private external fun nativeOnPermissionResult(requestCode: Int, granted: Boolean)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         nativeOnActivityCreated()
         keepContentClearOfSystemBars()
+        logPreviousExitReasons()
+
+        try {
+            taskWatcherBound = bindService(
+                Intent(this, TaskWatcherService::class.java),
+                taskWatcherConnection,
+                Context.BIND_AUTO_CREATE,
+            )
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "Failed to bind task watcher: ${e.message}")
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        started = true
+    }
+
+    override fun onStop() {
+        started = false
+        super.onStop()
     }
 
     override fun onDestroy() {
         nativeOnActivityDestroyed()
         releaseDiscoveryLocks()
+        if (isFinishing) {
+            MediaSessionManager.peek()?.hide()
+        }
+        if (taskWatcherBound) {
+            try {
+                unbindService(taskWatcherConnection)
+            } catch (e: Exception) {
+                android.util.Log.w(TAG, "Failed to unbind task watcher: ${e.message}")
+            }
+            taskWatcherBound = false
+        }
         super.onDestroy()
     }
 
@@ -59,6 +111,30 @@ class MainActivity : TauriActivity() {
         }
     }
 
+    /** Records why the process last died, so background kills and crashes show up in logcat. */
+    private fun logPreviousExitReasons() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            return
+        }
+
+        try {
+            val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            activityManager.getHistoricalProcessExitReasons(packageName, 0, 5).forEach { info ->
+                android.util.Log.i(
+                    TAG,
+                    "Previous exit: reason=${info.reason} status=${info.status} " +
+                        "importance=${info.importance} at=${info.timestamp} " +
+                        "description=${info.description}",
+                )
+            }
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "Failed to read previous exit reasons: ${e.message}")
+        }
+    }
+
+    // The methods below are called from Rust over JNI, on threads that are not the UI thread.
+    // None of them may throw: a Java exception would surface in Rust as a failed command at best.
+
     @Keep
     fun updateMediaSession(
         deviceName: String,
@@ -68,78 +144,122 @@ class MainActivity : TauriActivity() {
         appId: String?,
         isPlaying: Boolean,
     ) {
-        val updateIntent = Intent(this, MediaControlService::class.java).apply {
-            action = MediaControlService.ACTION_UPDATE
-            putExtra(MediaControlService.EXTRA_DEVICE_NAME, deviceName)
-            putExtra(MediaControlService.EXTRA_DEVICE_IP, deviceIp)
-            putExtra(MediaControlService.EXTRA_DEVICE_PORT, devicePort)
-            putExtra(MediaControlService.EXTRA_APP_NAME, appName)
-            putExtra(MediaControlService.EXTRA_APP_ID, appId)
-            putExtra(MediaControlService.EXTRA_IS_PLAYING, isPlaying)
-        }
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            ContextCompat.startForegroundService(this, updateIntent)
-        } else {
-            startService(updateIntent)
+        runOnUiThread {
+            // A poll that was in flight when the app was backgrounded can land here late. The
+            // notification is only refreshed while the activity is visible.
+            if (!started) {
+                return@runOnUiThread
+            }
+            try {
+                MediaSessionManager.getInstance(applicationContext)
+                    .show(deviceName, deviceIp, devicePort, appName, appId, isPlaying)
+            } catch (e: Throwable) {
+                android.util.Log.e(TAG, "Failed to update media notification: ${e.message}", e)
+            }
         }
     }
 
     @Keep
     fun hideMediaNotification() {
-        val hideIntent = Intent(this, MediaControlService::class.java).apply {
-            action = MediaControlService.ACTION_HIDE
+        runOnUiThread {
+            try {
+                MediaSessionManager.peek()?.hide()
+            } catch (e: Throwable) {
+                android.util.Log.e(TAG, "Failed to hide media notification: ${e.message}", e)
+            }
         }
-        startService(hideIntent)
     }
 
     @Keep
-    fun ensureDiscoveryPermissions(): Boolean {
-        val permissionsNeeded = mutableListOf<String>()
+    fun performHapticTap() {
+        runOnUiThread {
+            try {
+                window.decorView.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+            } catch (e: Throwable) {
+                android.util.Log.w(TAG, "Haptic feedback failed: ${e.message}")
+            }
+        }
+    }
 
+    /** True when reaching devices on the LAN needs a runtime permission on this OS version. */
+    @Keep
+    fun localNetworkPermissionRequired(): Boolean {
+        return Build.VERSION.SDK_INT >= API_LOCAL_NETWORK_PERMISSION
+    }
+
+    private fun missingDiscoveryPermissions(): List<String> {
+        // From Android 17 the single local-network permission covers SSDP and ECP traffic.
+        if (Build.VERSION.SDK_INT >= API_LOCAL_NETWORK_PERMISSION) {
+            return listOf(ACCESS_LOCAL_NETWORK).filterNot(::hasPermission)
+        }
+
+        val permissions = mutableListOf<String>()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            if (!hasPermission(Manifest.permission.ACCESS_FINE_LOCATION)) {
-                permissionsNeeded.add(Manifest.permission.ACCESS_FINE_LOCATION)
-            }
-            if (!hasPermission(Manifest.permission.ACCESS_COARSE_LOCATION)) {
-                permissionsNeeded.add(Manifest.permission.ACCESS_COARSE_LOCATION)
-            }
+            permissions.add(Manifest.permission.ACCESS_FINE_LOCATION)
+            permissions.add(Manifest.permission.ACCESS_COARSE_LOCATION)
         }
-
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (!hasPermission(Manifest.permission.NEARBY_WIFI_DEVICES)) {
-                permissionsNeeded.add(Manifest.permission.NEARBY_WIFI_DEVICES)
-            }
+            permissions.add(Manifest.permission.NEARBY_WIFI_DEVICES)
         }
-
-        if (permissionsNeeded.isNotEmpty()) {
-            ActivityCompat.requestPermissions(
-                this,
-                permissionsNeeded.toTypedArray(),
-                DISCOVERY_PERMISSION_REQUEST_CODE,
-            )
-            return false
-        }
-
-        return true
+        return permissions.filterNot(::hasPermission)
     }
 
     @Keep
-    fun ensureNotificationPermission(): Boolean {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
-            return true
+    fun discoveryPermissionsGranted(): Boolean {
+        return try {
+            missingDiscoveryPermissions().isEmpty()
+        } catch (e: Throwable) {
+            android.util.Log.e(TAG, "Failed to check discovery permissions: ${e.message}", e)
+            false
         }
+    }
 
-        if (hasPermission(Manifest.permission.POST_NOTIFICATIONS)) {
-            return true
+    /** Asks for whatever is missing. The outcome arrives through [nativeOnPermissionResult]. */
+    @Keep
+    fun requestDiscoveryPermissions() {
+        runOnUiThread {
+            try {
+                val missing = missingDiscoveryPermissions()
+                if (missing.isEmpty()) {
+                    nativeOnPermissionResult(DISCOVERY_PERMISSION_REQUEST_CODE, true)
+                } else {
+                    ActivityCompat.requestPermissions(
+                        this,
+                        missing.toTypedArray(),
+                        DISCOVERY_PERMISSION_REQUEST_CODE,
+                    )
+                }
+            } catch (e: Throwable) {
+                android.util.Log.e(TAG, "Failed to request discovery permissions: ${e.message}", e)
+                nativeOnPermissionResult(DISCOVERY_PERMISSION_REQUEST_CODE, false)
+            }
         }
+    }
 
-        ActivityCompat.requestPermissions(
-            this,
-            arrayOf(Manifest.permission.POST_NOTIFICATIONS),
-            NOTIFICATION_PERMISSION_REQUEST_CODE,
-        )
-        return false
+    @Keep
+    fun notificationPermissionGranted(): Boolean {
+        return Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            hasPermission(Manifest.permission.POST_NOTIFICATIONS)
+    }
+
+    @Keep
+    fun requestNotificationPermission() {
+        runOnUiThread {
+            try {
+                if (notificationPermissionGranted()) {
+                    nativeOnPermissionResult(NOTIFICATION_PERMISSION_REQUEST_CODE, true)
+                } else {
+                    ActivityCompat.requestPermissions(
+                        this,
+                        arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                        NOTIFICATION_PERMISSION_REQUEST_CODE,
+                    )
+                }
+            } catch (e: Throwable) {
+                android.util.Log.e(TAG, "Failed to request notification permission: ${e.message}", e)
+                nativeOnPermissionResult(NOTIFICATION_PERMISSION_REQUEST_CODE, false)
+            }
+        }
     }
 
     override fun onRequestPermissionsResult(
@@ -149,49 +269,29 @@ class MainActivity : TauriActivity() {
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
 
-        val granted = grantResults.all { it == PackageManager.PERMISSION_GRANTED }
-        when (requestCode) {
-            DISCOVERY_PERMISSION_REQUEST_CODE -> {
-                if (granted) {
-                    android.util.Log.d("RokuRemote", "Discovery permissions granted")
-                } else {
-                    android.util.Log.w("RokuRemote", "Discovery permissions denied")
-                }
-            }
-
-            NOTIFICATION_PERMISSION_REQUEST_CODE -> {
-                if (granted) {
-                    android.util.Log.d("RokuRemote", "Notification permission granted")
-                } else {
-                    android.util.Log.w("RokuRemote", "Notification permission denied")
-                }
-            }
+        // Re-check instead of trusting grantResults: it is empty when the request is interrupted.
+        val granted = when (requestCode) {
+            DISCOVERY_PERMISSION_REQUEST_CODE -> discoveryPermissionsGranted()
+            NOTIFICATION_PERMISSION_REQUEST_CODE -> notificationPermissionGranted()
+            else -> return
         }
+        android.util.Log.i(TAG, "Permission request $requestCode granted=$granted")
+        nativeOnPermissionResult(requestCode, granted)
     }
 
     @Keep
     fun acquireDiscoveryLocks() {
         try {
             val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-
-            if (wifiLock == null || wifiLock?.isHeld != true) {
-                wifiLock = wifiManager.createWifiLock(
-                    WifiManager.WIFI_MODE_FULL_HIGH_PERF,
-                    "roku_remote_wifi_lock",
-                )
-                wifiLock?.setReferenceCounted(false)
-                wifiLock?.acquire()
-                android.util.Log.d("RokuRemote", "WiFi lock acquired")
+            if (multicastLock?.isHeld != true) {
+                multicastLock = wifiManager.createMulticastLock("roku_ssdp_multicast").apply {
+                    setReferenceCounted(false)
+                    acquire()
+                }
+                android.util.Log.d(TAG, "Multicast lock acquired")
             }
-
-            if (multicastLock == null || multicastLock?.isHeld != true) {
-                multicastLock = wifiManager.createMulticastLock("roku_ssdp_multicast")
-                multicastLock?.setReferenceCounted(false)
-                multicastLock?.acquire()
-                android.util.Log.d("RokuRemote", "Multicast lock acquired")
-            }
-        } catch (e: Exception) {
-            android.util.Log.e("RokuRemote", "Failed to acquire discovery locks: ${e.message}", e)
+        } catch (e: Throwable) {
+            android.util.Log.e(TAG, "Failed to acquire multicast lock: ${e.message}", e)
         }
     }
 
@@ -201,21 +301,13 @@ class MainActivity : TauriActivity() {
             multicastLock?.let {
                 if (it.isHeld) {
                     it.release()
-                    android.util.Log.d("RokuRemote", "Multicast lock released")
+                    android.util.Log.d(TAG, "Multicast lock released")
                 }
             }
-            multicastLock = null
-
-            wifiLock?.let {
-                if (it.isHeld) {
-                    it.release()
-                    android.util.Log.d("RokuRemote", "WiFi lock released")
-                }
-            }
-            wifiLock = null
-        } catch (e: Exception) {
-            android.util.Log.e("RokuRemote", "Failed to release discovery locks: ${e.message}", e)
+        } catch (e: Throwable) {
+            android.util.Log.e(TAG, "Failed to release multicast lock: ${e.message}", e)
         }
+        multicastLock = null
     }
 
     private fun hasPermission(permission: String): Boolean {

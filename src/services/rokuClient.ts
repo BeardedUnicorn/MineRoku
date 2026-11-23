@@ -199,6 +199,11 @@ export async function clearAllData(): Promise<void> {
   return invoke<void>('clear_all_data');
 }
 
+/** Removes one device and its cached apps and icons from the backend cache. */
+export async function forgetDevice(hardwareId: string): Promise<void> {
+  return invoke<void>('forget_device', { hardwareId });
+}
+
 export async function restartApp(): Promise<void> {
   return invoke<void>('restart_app');
 }
@@ -226,4 +231,22 @@ export async function ensureAndroidNotificationPermission(): Promise<boolean> {
 
 export async function openAndroidAppSettings(): Promise<void> {
   return invoke<void>('open_android_app_settings');
+}
+
+/** Removes the Android media notification. A no-op on other platforms. */
+export async function hideMediaNotification(): Promise<void> {
+  return invoke<void>('hide_media_notification');
+}
+
+/**
+ * Android 17+ needs a runtime permission to reach devices on the LAN at all, even without a
+ * scan. Resolves with the user's answer; always `true` on older Android and other platforms.
+ */
+export async function ensureAndroidLocalNetworkAccess(): Promise<boolean> {
+  return invoke<boolean>('ensure_android_local_network_access');
+}
+
+/** A short haptic tick on Android; a no-op elsewhere. Never rejects. */
+export function hapticTap(): void {
+  void invoke<void>('haptic_tap').catch(() => undefined);
 }
