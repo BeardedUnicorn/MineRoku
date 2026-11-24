@@ -113,6 +113,8 @@ icons  (device_ip TEXT, app_id TEXT, icon_data TEXT, cached_at,
 -- Indexes on devices(ip), apps(device_ip), icons(device_ip)
 ```
 
+On startup `background.rs` drops tables left over from before devices were keyed by `hardware_id`: an IP-keyed `devices`, and an `apps` that still has `FOREIGN KEY (device_ip) REFERENCES devices(ip)`. That old key no longer points at a unique column, so SQLite (foreign keys are on in the bundled build) rejects writes to both tables with "foreign key mismatch". Both tables are caches and refill on the next scan or app-list fetch.
+
 `hardware_id` is derived from device-info in this priority order: serial number → device id → ethernet MAC → wifi MAC → hash of name+url. That makes it stable across reboots and DHCP changes — use it, not IP, as the durable identity for anything persisted.
 
 ## Discovery and device identity
