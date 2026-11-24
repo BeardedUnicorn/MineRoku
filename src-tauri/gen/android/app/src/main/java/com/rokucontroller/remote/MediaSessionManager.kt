@@ -1,3 +1,7 @@
+// androidx.media 1.8 deprecates MediaSessionCompat and its companions in favour of Media3.
+// The lock-screen controls still run on them; moving to Media3 is a rewrite of this file.
+@file:Suppress("DEPRECATION")
+
 package com.rokucontroller.remote
 
 import android.Manifest

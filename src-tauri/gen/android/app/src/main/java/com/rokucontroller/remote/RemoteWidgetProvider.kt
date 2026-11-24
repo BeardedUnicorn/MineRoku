@@ -7,12 +7,12 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.util.SizeF
 import android.view.View
 import android.widget.RemoteViews
+import androidx.core.net.toUri
 import java.util.concurrent.Executors
 
 /**
@@ -205,7 +205,7 @@ class RemoteWidgetProvider : AppWidgetProvider() {
         private fun buttonIntent(context: Context, widgetId: Int, button: WidgetButton): PendingIntent {
             val intent = Intent(context, WidgetActionReceiver::class.java)
                 .setAction(ACTION_BUTTON)
-                .setData(Uri.parse(WidgetUris.action(widgetId, button.command)))
+                .setData(WidgetUris.action(widgetId, button.command).toUri())
                 // A remote should feel immediate: don't queue behind background broadcasts.
                 .addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
             return PendingIntent.getBroadcast(context, 0, intent, IMMUTABLE_UPDATE)
@@ -214,7 +214,7 @@ class RemoteWidgetProvider : AppWidgetProvider() {
         private fun configureIntent(context: Context, widgetId: Int): PendingIntent {
             val intent = Intent(context, RemoteWidgetConfigActivity::class.java)
                 .setAction(AppWidgetManager.ACTION_APPWIDGET_CONFIGURE)
-                .setData(Uri.parse(WidgetUris.configure(widgetId)))
+                .setData(WidgetUris.configure(widgetId).toUri())
                 .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             return PendingIntent.getActivity(context, 0, intent, IMMUTABLE_UPDATE)

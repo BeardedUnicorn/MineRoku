@@ -43,6 +43,7 @@
             android:src="@drawable/ic_remote_left" />
         <Button
             android:id="@+id/btn_ok"
+            tools:ignore="ButtonOrder"
             android:layout_width="0dp"
             android:layout_height="match_parent"
             android:layout_weight="1"
