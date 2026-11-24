@@ -1,12 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import userEvent from '@testing-library/user-event';
-import { cleanup, screen, waitFor } from '@testing-library/react';
+import { cleanup, screen, waitFor, within } from '@testing-library/react';
 import Sidebar from './Sidebar';
 import { renderWithTheme } from '../testUtils';
 import { useAppStore, RokuDevice } from '../store';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { invoke } from '@tauri-apps/api/core';
 import { iconCache } from '../iconCache';
+import { resetUpdates, useUpdates } from '../services/updates';
 
 describe('Sidebar', () => {
   const device: RokuDevice = {
@@ -31,6 +32,8 @@ describe('Sidebar', () => {
     vi.mocked(invoke).mockReset();
     vi.mocked(invoke).mockResolvedValue(undefined);
     iconCache.clear();
+    localStorage.clear();
+    resetUpdates();
   });
 
   // Dialogs left open by one test would hide the rest of the page from the next.
@@ -218,5 +221,59 @@ describe('Sidebar', () => {
     expect(await screen.findByText(/could not delete saved data: disk full/i)).toBeInTheDocument();
     expect(useAppStore.getState().devices).toHaveLength(1);
     expect(invoke).not.toHaveBeenCalledWith('restart_app');
+  });
+
+  describe('updates in settings', () => {
+    async function openSettings() {
+      renderWithTheme(<Sidebar isOpen onToggle={() => {}} scanForDevices={vi.fn()} isScanning={false} />);
+      const [settingsBtn] = screen.getAllByLabelText(/settings/i);
+      await userEvent.click(settingsBtn);
+      return screen.findByRole('dialog', { name: 'Settings' });
+    }
+
+    it('shows the version and checks for updates on request', async () => {
+      vi.mocked(invoke).mockImplementation((cmd: string) =>
+        Promise.resolve(cmd === 'check_for_update' ? null : undefined)
+      );
+      const dialog = await openSettings();
+
+      expect(await within(dialog).findByText('Version 0.1.0')).toBeInTheDocument();
+      await userEvent.click(within(dialog).getByRole('button', { name: 'Check for updates' }));
+
+      expect(invoke).toHaveBeenCalledWith('check_for_update');
+      expect(await within(dialog).findByText('Roku Remote is up to date.')).toBeInTheDocument();
+    });
+
+    it('offers an update a check found', async () => {
+      const update = { version: '0.2.0', currentVersion: '0.1.0', notes: null, changelog: null, date: null };
+      vi.mocked(invoke).mockImplementation((cmd: string) =>
+        Promise.resolve(cmd === 'check_for_update' ? update : undefined)
+      );
+      const dialog = await openSettings();
+      await userEvent.click(within(dialog).getByRole('button', { name: 'Check for updates' }));
+
+      expect(await within(dialog).findByText('Roku Remote 0.2.0 is available.')).toBeInTheDocument();
+      useUpdates.getState().later();
+      await userEvent.click(within(dialog).getByRole('button', { name: 'Update…' }));
+      expect(useUpdates.getState().update).toEqual({ status: 'available', update, open: true });
+    });
+
+    it('shows why a check failed', async () => {
+      vi.mocked(invoke).mockImplementation((cmd: string) =>
+        cmd === 'check_for_update' ? Promise.reject('offline') : Promise.resolve(undefined)
+      );
+      const dialog = await openSettings();
+      await userEvent.click(within(dialog).getByRole('button', { name: 'Check for updates' }));
+      expect(await within(dialog).findByText("Couldn't check for updates. Offline.")).toBeInTheDocument();
+    });
+
+    it('turns automatic checks off', async () => {
+      const dialog = await openSettings();
+      const toggle = within(dialog).getByRole('switch', { name: 'Check for updates automatically' });
+      expect(toggle).toBeChecked();
+      await userEvent.click(toggle);
+      expect(useUpdates.getState().autoCheck).toBe(false);
+      expect(localStorage.getItem('rokuUpdateAutoCheck')).toBe('false');
+    });
   });
 });

@@ -11,8 +11,12 @@ import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
+import android.provider.Settings
+import android.security.advancedprotection.AdvancedProtectionManager
 import android.view.HapticFeedbackConstants
 import android.view.View
+import android.webkit.JavascriptInterface
+import android.webkit.WebView
 import androidx.annotation.Keep
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -23,6 +27,7 @@ import androidx.core.view.WindowInsetsCompat
 class MainActivity : TauriActivity() {
     private var multicastLock: WifiManager.MulticastLock? = null
     private var taskWatcherBound = false
+    private var webView: WebView? = null
 
     @Volatile
     private var started = false
@@ -50,6 +55,10 @@ class MainActivity : TauriActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         nativeOnActivityCreated()
+        // The page hears how the app's own update download is going (AppUpdate)
+        AppUpdate.attach(this) { report ->
+            webView?.evaluateJavascript("window.__rokuUpdate && window.__rokuUpdate($report)", null)
+        }
         keepContentClearOfSystemBars()
         logPreviousExitReasons()
 
@@ -74,8 +83,20 @@ class MainActivity : TauriActivity() {
         super.onStop()
     }
 
+    // Android opens the update's installer only while the app is in front (AppUpdate)
+    override fun onResume() {
+        super.onResume()
+        AppUpdate.resumed(this)
+    }
+
+    override fun onPause() {
+        AppUpdate.paused(this)
+        super.onPause()
+    }
+
     override fun onDestroy() {
         nativeOnActivityDestroyed()
+        AppUpdate.detach(this)
         releaseDiscoveryLocks()
         if (isFinishing) {
             MediaSessionManager.peek()?.hide()
@@ -89,6 +110,50 @@ class MainActivity : TauriActivity() {
             taskWatcherBound = false
         }
         super.onDestroy()
+    }
+
+    override fun onWebViewCreate(webView: WebView) {
+        this.webView = webView
+        webView.addJavascriptInterface(AppBridge(), "RokuApp")
+    }
+
+    /**
+     * What the page calls as `window.RokuApp`: the app's own update. Call it
+     * on the bridge object itself, because Android refuses a method that has
+     * been taken off it. Its methods run on a WebView thread.
+     */
+    private inner class AppBridge {
+        /**
+         * Downloads a release and opens Android's installer on it (AppUpdate),
+         * which reports progress to `window.__rokuUpdate`. The download
+         * belongs to the app: it outlives this activity, and asking again while
+         * it runs joins it.
+         */
+        @JavascriptInterface
+        fun downloadUpdate(version: String) {
+            AppUpdate.download(applicationContext, version)
+        }
+
+        /**
+         * Whether the phone won't install an update: Android 16's Advanced
+         * Protection blocks apps that don't come from a store, as this app's
+         * updates don't.
+         */
+        @JavascriptInterface
+        fun installsBlocked(): Boolean =
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA &&
+                runCatching {
+                    getSystemService(AdvancedProtectionManager::class.java)?.isAdvancedProtectionEnabled == true
+                }.getOrDefault(false)
+
+        /** The phone's Security settings, where Advanced Protection is turned off. */
+        @JavascriptInterface
+        fun openSecuritySettings() {
+            runOnUiThread {
+                runCatching { startActivity(Intent(Settings.ACTION_SECURITY_SETTINGS)) }
+                    .onFailure { runCatching { startActivity(Intent(Settings.ACTION_SETTINGS)) } }
+            }
+        }
     }
 
     // Android draws edge-to-edge for targetSdk 35+, so the WebView would otherwise sit under the

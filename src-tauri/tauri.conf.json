@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Roku Remote",
-  "version": "0.1.0",
+  "version": "../package.json",
   "identifier": "com.rokucontroller.remote",
   "build": {
     "beforeDevCommand": "pnpm dev",
@@ -31,6 +31,16 @@
     ],
     "security": {
       "csp": null
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDJGMDg5MjQ5REYyODVCRDQKUldUVVd5amZTWklJTHhJSGZlWUVxNkptZDVkaU5Zd1JLZlFtdEJYcGIzcDlZSC9Bd2J3THduL0EK",
+      "endpoints": ["https://github.com/BeardedUnicorn/MineRoku/releases/latest/download/latest.json"],
+      "requireSignedVersion": true,
+      "windows": {
+        "installMode": "passive"
+      }
     }
   },
   "bundle": {

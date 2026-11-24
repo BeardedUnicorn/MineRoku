@@ -51,6 +51,9 @@ Entry path: [src/main.tsx](src/main.tsx) mounts [src/App.tsx](src/App.tsx), whic
 | `RemoteControl.tsx` | Dpad, system/volume/playback buttons, keyboard shortcuts, active-app polling, Android media-notification updates |
 | `AppLauncher.tsx` (lazy) | Installed-app grid with search, favorites, responsive pagination, icon caching |
 | `Sidebar.tsx` | Device list with online/offline, settings dialog, data deletion |
+| `UpdatePrompt.tsx` | The update dialog; also runs the automatic checks (10 s after launch, then daily) |
+| `UpdatesSection.tsx` | Settings → Updates: version, Check for updates, automatic checks on/off |
+| `UpdateNotes.tsx` | Release notes since the running version, from the feed's CHANGELOG sections |
 | `BottomNavBar.tsx` | Mobile-only Remote/Apps toggle |
 | `MediaPlayerModal.tsx` (lazy) | Detail view for current media (position, format, plugin) |
 | `RemoteButtonSpecs.tsx` | Declarative button-group metadata (system/volume/playback/power) |
@@ -59,6 +62,8 @@ Entry path: [src/main.tsx](src/main.tsx) mounts [src/App.tsx](src/App.tsx), whic
 **Hooks** ([src/hooks/usePlatform.ts](src/hooks/usePlatform.ts)) — caches Tauri's `platform()` promise so any consumer can synchronously branch on Android vs desktop after first await.
 
 **Services** ([src/services/rokuClient.ts](src/services/rokuClient.ts)) — every `invoke()` call lives here. It also implements request deduplication (one in-flight `discover_roku_devices`, one per device for `list_roku_apps`) and a concurrency-6 queue for icon fetches. Treat this file as the *only* place commands are named on the frontend; renaming a command should touch exactly one TS file.
+
+**Updates.** [src/services/updates.ts](src/services/updates.ts) is a separate Zustand store (`useUpdates`) for the update dialog's state machine: `idle`, `checking`, `upToDate`, `checkFailed`, `available`, `installing` and `installFailed`. Desktop installs go through `install_update` and `update-progress` events. A phone downloads through `window.RokuApp` ([src/services/androidUpdate.ts](src/services/androidUpdate.ts), see [Android platform layer](#android-platform-layer)), with `open_update_download` (the browser) as its fallback. Whether checks are automatic, and when the last one ran, are kept in `localStorage` under `rokuUpdate*` keys, which Delete All Data clears.
 
 **Caches.** [src/iconCache.ts](src/iconCache.ts) is an in-memory LRU (~1h TTL, ~100 items) layered over the backend's SQLite icon cache — first the React component checks memory, then asks the backend, which either returns its row or fetches from the Roku.
 
@@ -75,6 +80,7 @@ Files:
 - [commands.rs](src-tauri/src/commands.rs) — all network/business logic as `_impl` async functions.
 - [background.rs](src-tauri/src/background.rs) — `DatabaseManager`, an async actor over `rusqlite`. The app sends jobs via an mpsc channel; the actor owns the connection and runs them serially.
 - [background_discovery.rs](src-tauri/src/background_discovery.rs) — periodic SSDP loop and subnet-scan fallback; emits frontend events.
+- [updates.rs](src-tauri/src/updates.rs) — updates from GitHub releases. On desktop it uses `tauri-plugin-updater` (signature check, install, restart). On Android it reads `latest.json` with reqwest, compares versions and builds the APK's address. It holds the `UpdateState` that keeps what the last check found.
 
 **Command wrappers vs `_impl` split.** This is the most important convention to know. Command wrappers (decorated with `#[command]`) live in [lib.rs](src-tauri/src/lib.rs) and are just thin shims — they handle Android permission/lock dances if needed, then call the `_impl` function defined in [commands.rs](src-tauri/src/commands.rs). The `_impl` functions are also reused from JNI on Android (see [lib.rs:211](src-tauri/src/lib.rs:211) and [lib.rs:238](src-tauri/src/lib.rs:238)), which is why the split exists. When adding a command, add the logic as `xxx_impl` in `commands.rs` and the `#[command] async fn xxx(...)` wrapper in `lib.rs`, then register it in the `generate_handler!` block.
 
@@ -91,9 +97,10 @@ Files:
 | Apps | `list_roku_apps`, `launch_roku_app`, `get_active_app`, `get_app_icon`, `get_cached_apps` |
 | Control | `send_roku_command`, `get_media_player` |
 | Lifecycle / data | `clear_all_data`, `restart_app` |
+| Updates | `check_for_update`; `install_update` (desktop: emits `update-progress`, then restarts); `open_update_download` (Android: the APK in the browser) |
 | Android-only (no-op on desktop) | `ensure_android_discovery_permissions`, `ensure_android_notification_permission`, `open_android_app_settings`, `update_media_notification`, `hide_media_notification` |
 
-**Events to the frontend** (emitted from the discovery loop): `discovery_cycle_start`, `device_discovered`, `device_lost`, `discovery_cycle_end`. The frontend subscribes with `@tauri-apps/api/event`'s `listen()` in `App.tsx`.
+**Events to the frontend**: from the discovery loop, `discovery_cycle_start`, `device_discovered`, `device_lost` and `discovery_cycle_end`; from a desktop update's download, `update-progress` (`{downloaded, total, installing}`). The frontend subscribes with `@tauri-apps/api/event`'s `listen()` in `App.tsx`.
 
 ## Native crates (`crates/`)
 
@@ -146,6 +153,9 @@ Kotlin sources live under [src-tauri/gen/android/app/src/main/java/com/rokucontr
 - `MediaSessionManager.kt` — media controls on the lock screen and notification shade. A process-wide singleton holding a `MediaSessionCompat`; `show(...)` posts the notification and `hide()` removes it. State is confined to the main thread; only the native calls run on IO.
 - `MediaControlReceiver.kt` — broadcast receiver for the notification's buttons. Sends the key straight through the native bridge, so it works in a process that has no activity.
 - `TaskWatcherService.kt` — bound-only service whose single job is `onTaskRemoved`: remove the notification when the app is swiped away.
+- `AppUpdate.kt` — the app's own update. It downloads a release's APK into `cache/updates`, resuming with `Range` requests when Android cuts a backgrounded app off. It checks the APK's package and versionName, then opens Android's installer through the FileProvider. The installer only opens while the activity is resumed, because Android silently drops a launch from the background. `UpdateRelease.kt` holds its pure parts (the APK's name and address, header parsing), which `UpdateReleaseTest` covers.
+
+**JavaScript bridge.** Unlike the rest of the Android layer, the update doesn't go through Rust. `MainActivity.onWebViewCreate` adds `window.RokuApp` with three methods: `downloadUpdate(version)`, `installsBlocked()` (Android 16+ Advanced Protection) and `openSecuritySettings()`. `AppUpdate` reports progress to `window.__rokuUpdate` with `evaluateJavascript`. ProGuard keeps `@JavascriptInterface` methods, because release builds are minified.
 
 **No foreground service.** The media notification is a plain `MediaStyle` notification. It used to be backed by a `START_STICKY` `mediaPlayback` foreground service that was never stopped; after the process died in the background the system restarted it with no activity and it called `startForeground`, which Android rejects. The notification is now shown only while the activity is visible and removed on device switch, forget, Delete All Data, task removal and exit. The trade-off: once Android freezes or kills the backgrounded app the lock-screen controls can go stale or disappear. Do not reintroduce a sticky or media-typed foreground service to "fix" that.
 
@@ -195,7 +205,12 @@ Android:
 - `pnpm android:lint` → `./gradlew :app:lintArm64Debug -x rustBuildArm64Debug`
 - `pnpm android:test` → `./gradlew :app:testArm64DebugUnitTest -x rustBuildArm64Debug`
 - CI: [.github/workflows/android-mobile.yml](.github/workflows/android-mobile.yml) runs both on push/PR. Gradle's Rust build is skipped to keep the lane fast, so CI first runs `cargo check` for `aarch64-linux-android`: its build scripts generate the gitignored `tauri.settings.gradle` and `generated/*.kt` that Gradle needs. Locally, use `pnpm tauri android dev` or the Gradle tasks without the `-x rustBuildArm64Debug` exclusion.
-- Signing: copy `src-tauri/gen/android/keystore.properties.example` to `keystore.properties` and fill in local values. Do not commit the real file.
+- Signing: copy `src-tauri/gen/android/keystore.properties.example` to `keystore.properties` and fill in local values. Do not commit the real file. Release APKs must use the release key (README "Android signing").
+
+Releases:
+
+- `pnpm release <patch|minor|major>` bumps the version (package.json, Cargo.toml, Cargo.lock; `tauri.conf.json` reads package.json's), releases CHANGELOG.md's Unreleased section, commits and tags. `pnpm release publish` pushes the tag.
+- [.github/workflows/release.yml](.github/workflows/release.yml) builds macOS arm64/x64, Windows x64 and the Android arm64 APK from the tag with `node scripts/release.mjs build --target …`, then `github-release` writes `latest.json` and publishes. The pure parts (asset names, bundle paths, the minisign and apksigner checks) are in [scripts/release/lib.mjs](scripts/release/lib.mjs), tested by `pnpm test:scripts`.
 
 ## Conventions worth knowing
 

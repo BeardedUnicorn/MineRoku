@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
 export interface RokuDeviceEvent {
   name: string;
@@ -206,6 +207,51 @@ export async function forgetDevice(hardwareId: string): Promise<void> {
 
 export async function restartApp(): Promise<void> {
   return invoke<void>('restart_app');
+}
+
+/** check_for_update's reply when there's a newer release (updates.rs). */
+export interface AvailableUpdate {
+  version: string;
+  /** The version running now. */
+  currentVersion: string;
+  /** The release's CHANGELOG section (Markdown). */
+  notes: string | null;
+  /** Every release's notes, newest first (the CHANGELOG's sections); null from a feed without them. */
+  changelog: string | null;
+  /** When it was published (RFC 3339). */
+  date: string | null;
+}
+
+/** `update-progress`'s payload while a desktop installs an update. */
+export interface UpdateProgress {
+  downloaded: number;
+  /** null when the server doesn't say. */
+  total: number | null;
+  /** The download is done and the update is being installed. */
+  installing: boolean;
+}
+
+/** Asks the latest GitHub release whether there's a newer version; null when this is the newest. */
+export async function checkForUpdate(): Promise<AvailableUpdate | null> {
+  return invoke<AvailableUpdate | null>('check_for_update');
+}
+
+/**
+ * A desktop's update: downloads, verifies and installs what the last check
+ * found, then restarts into it. Only comes back on failure.
+ */
+export async function installUpdate(): Promise<void> {
+  return invoke<void>('install_update');
+}
+
+/** A phone's fallback: opens the found release's APK in the browser. */
+export async function openUpdateDownload(): Promise<void> {
+  return invoke<void>('open_update_download');
+}
+
+/** Hears a desktop install's download progress. */
+export function onUpdateProgress(handler: (progress: UpdateProgress) => void): Promise<UnlistenFn> {
+  return listen<UpdateProgress>('update-progress', (event) => handler(event.payload));
 }
 
 export async function updateMediaNotification(

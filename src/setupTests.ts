@@ -33,6 +33,11 @@ vi.mock('@tauri-apps/api/window', () => ({
   },
 }));
 
+vi.mock('@tauri-apps/api/app', () => ({
+  getVersion: vi.fn(() => Promise.resolve('0.1.0')),
+  onBackButtonPress: vi.fn(() => Promise.resolve({ unregister: vi.fn() })),
+}));
+
 vi.mock('@tauri-apps/plugin-os', () => ({
   platform: vi.fn(() => Promise.resolve('linux')),
 }));

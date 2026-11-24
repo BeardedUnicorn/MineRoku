@@ -58,7 +58,10 @@ export default defineConfig(async () => ({
   test: {
     environment: 'jsdom',
     setupFiles: './src/setupTests.ts',
+    // The app's tests; scripts/ has its own (node --test, `pnpm test:scripts`)
+    include: ['src/**/*.test.{ts,tsx}'],
     coverage: {
+      include: ['src/**'],
       reporter: ['text', 'html'],
     },
   },
