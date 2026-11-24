@@ -613,6 +613,63 @@ pub async fn send_roku_command_impl(
     Ok(format!("Sent '{}' to {}:{}", command, ip, port))
 }
 
+/// The key that changes a Roku TV's power state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PowerKey {
+    PowerOn,
+    PowerOff,
+    /// The plain toggle, for when the current state is unknown.
+    Power,
+}
+
+impl PowerKey {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PowerKey::PowerOn => "PowerOn",
+            PowerKey::PowerOff => "PowerOff",
+            PowerKey::Power => "Power",
+        }
+    }
+}
+
+/// The `power-mode` reported by `query/device-info` ("PowerOn", "DisplayOff", "Ready", ...).
+pub fn parse_power_mode(xml: &str) -> Option<String> {
+    extract_element_text(xml, "power-mode").filter(|mode| !mode.is_empty())
+}
+
+/// Which key flips the power state: off when the TV is on, on from every standby mode, and the
+/// plain toggle when the device doesn't say.
+pub fn power_key_for_mode(mode: Option<&str>) -> PowerKey {
+    match mode.map(str::trim) {
+        Some("PowerOn") => PowerKey::PowerOff,
+        Some(mode) if !mode.is_empty() => PowerKey::PowerOn,
+        _ => PowerKey::Power,
+    }
+}
+
+/// Turns the TV on when it is in standby and off when it is on. Returns the key that was sent.
+/// When the device can't be reached nothing is sent.
+pub async fn toggle_power_impl(ip: String, port: u16) -> Result<String, String> {
+    let info_url = ecp_url(&ip, port, &["query", "device-info"])?;
+
+    let response = HTTP_CLIENT
+        .get(info_url)
+        .timeout(Duration::from_millis(2500))
+        .send()
+        .await
+        .map_err(|e| format!("Network error: {}", e))?;
+
+    let mode = if response.status().is_success() {
+        response.text().await.ok().and_then(|body| parse_power_mode(&body))
+    } else {
+        None
+    };
+
+    let key = power_key_for_mode(mode.as_deref());
+    send_roku_command_impl(ip, port, key.as_str().to_string()).await?;
+    Ok(key.as_str().to_string())
+}
+
 /// Launch an app using HTTP POST request.
 pub async fn launch_roku_app_impl(ip: String, port: u16, app_id: String) -> Result<String, String> {
     let endpoint = ecp_url(&ip, port, &["launch", &app_id])?;
@@ -735,6 +792,29 @@ mod tests {
     fn ecp_url_percent_encodes_segments() {
         let url = ecp_url("10.0.0.2", 8060, &["keypress", "Lit_a/b c?"]).unwrap();
         assert_eq!(url.as_str(), "http://10.0.0.2:8060/keypress/Lit_a%2Fb%20c%3F");
+    }
+
+    #[test]
+    fn power_mode_is_read_from_device_info() {
+        let xml = "<device-info>\n  <is-tv>true</is-tv>\n  <power-mode>DisplayOff</power-mode>\n</device-info>";
+        assert_eq!(parse_power_mode(xml).as_deref(), Some("DisplayOff"));
+        assert_eq!(parse_power_mode("<device-info><is-tv>false</is-tv></device-info>"), None);
+        assert_eq!(parse_power_mode("<device-info><power-mode></power-mode></device-info>"), None);
+    }
+
+    #[test]
+    fn power_key_turns_a_running_tv_off_and_a_standby_tv_on() {
+        assert_eq!(power_key_for_mode(Some("PowerOn")), PowerKey::PowerOff);
+        for standby in ["DisplayOff", "Ready", "Suspend", "Headless"] {
+            assert_eq!(power_key_for_mode(Some(standby)), PowerKey::PowerOn, "{standby}");
+        }
+    }
+
+    #[test]
+    fn power_key_falls_back_to_the_toggle_when_the_mode_is_unknown() {
+        assert_eq!(power_key_for_mode(None), PowerKey::Power);
+        assert_eq!(power_key_for_mode(Some("  ")), PowerKey::Power);
+        assert_eq!(PowerKey::Power.as_str(), "Power");
     }
 
     #[test]
