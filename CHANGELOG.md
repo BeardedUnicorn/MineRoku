@@ -6,7 +6,7 @@ heading into the new version's. Each section becomes that release's notes on
 GitHub, and the in-app update dialog shows the sections since the installed
 version (README's "Releasing").
 
-## Unreleased
+## 0.2.0 – 2026-11-23
 
 ### Added
 - The app updates itself from GitHub releases. On macOS and Windows it checks at launch and once a day, asks, then downloads, verifies, installs and restarts. On Android it downloads the new APK and opens Android's installer, which keeps your devices and settings. Settings → Updates shows the version, checks now, and turns automatic checks off.
