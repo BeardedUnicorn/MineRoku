@@ -1,6 +1,7 @@
 pub mod background;
 pub mod background_discovery;
 pub mod commands;
+pub mod updates;
 
 #[cfg(desktop)]
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
@@ -631,6 +632,50 @@ async fn restart_app(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Asks the latest release's latest.json whether there's a newer version
+/// (updates.rs). None: this is the newest.
+#[command]
+async fn check_for_update(
+    app: tauri::AppHandle,
+) -> Result<Option<updates::AvailableUpdate>, String> {
+    #[cfg(desktop)]
+    {
+        updates::desktop::check(&app).await
+    }
+    #[cfg(mobile)]
+    {
+        updates::mobile::check(&app).await
+    }
+}
+
+/// Installs the update the last check found and restarts into it, sending
+/// `update-progress` events as it downloads.
+#[cfg(desktop)]
+#[command]
+async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
+    updates::desktop::install(&app).await
+}
+
+#[cfg(mobile)]
+#[command]
+async fn install_update() -> Result<(), String> {
+    Err("A phone downloads its update instead.".to_string())
+}
+
+/// A phone's fallback update: opens the APK of the release the last check
+/// found in the browser (AppUpdate.kt downloads it in the app otherwise).
+#[cfg(mobile)]
+#[command]
+fn open_update_download(app: tauri::AppHandle) -> Result<(), String> {
+    updates::mobile::open_download(&app)
+}
+
+#[cfg(desktop)]
+#[command]
+fn open_update_download() -> Result<(), String> {
+    Err("A desktop installs its updates.".to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(target_os = "android")]
@@ -639,6 +684,7 @@ pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(opener())
         .plugin(tauri_plugin_os::init())
+        .manage(updates::UpdateState::default())
         .invoke_handler(tauri::generate_handler![
             discover_roku_devices,
             list_roku_apps,
@@ -660,8 +706,16 @@ pub fn run() {
             open_android_app_settings,
             update_media_notification,
             hide_media_notification,
-            check_device_connectivity
+            check_device_connectivity,
+            check_for_update,
+            install_update,
+            open_update_download
         ]);
+
+    // Updates from GitHub's latest release (plugins.updater in
+    // tauri.conf.json); the page asks before installing one (updates.rs)
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
 
     #[cfg(desktop)]
     let builder = builder

@@ -8,6 +8,8 @@ coverage/
 
 # Tauri
 src-tauri/target/
+# What `node scripts/release.mjs build` puts together for a release
+/releases/
 src-tauri/src/gen/
 *.rs.bk
 

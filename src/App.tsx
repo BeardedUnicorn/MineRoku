@@ -1,6 +1,7 @@
 import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import Sidebar from './components/Sidebar';
+import UpdatePrompt from './components/UpdatePrompt';
 import RemoteControl from './components/RemoteControl';
 import {
   Box,
@@ -614,6 +615,7 @@ const App: React.FC = () => {
           isScanning={isScanning}
         />
       </Box>
+      <UpdatePrompt />
       <Box sx={{ display: 'flex', flexDirection: 'column', flexGrow: 1, height: '100dvh', overflow: 'hidden' }}>
         <AppBar
           position="static"

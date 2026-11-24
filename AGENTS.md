@@ -18,7 +18,9 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the runtime topology, IPC surface, SQ
 - `pnpm build` — Type-check (`tsc`) then build frontend for production.
 - `pnpm tauri build` — Build/bundle the desktop app.
 - `pnpm test` — Run Vitest with coverage (text + HTML report).
-- Rust: `cargo check -p roku-controller` (Tauri crate) and `cargo test -p roku` (ECP XML parsing tests) from `src-tauri/`; `cargo test` from `crates/ssdp-client/` (vendored crate).
+- Rust: `cargo check -p roku-controller` (Tauri crate) and `cargo test -p roku` (ECP XML parsing tests) from `src-tauri/`; `cargo test` from `crates/ssdp-client/` (vendored crate). `cargo test -p roku-controller` covers the updater logic in `src-tauri/src/updates.rs`.
+- `pnpm test:scripts` — Release script tests (`node --test scripts/release/lib.test.mjs`).
+- `pnpm release <patch|minor|major>` / `pnpm release publish` — Cut and publish a release (README "Releasing"). Add user-facing changes under `## Unreleased` in `CHANGELOG.md` as they land.
 
 ## Coding Style & Naming Conventions
 - TypeScript strict mode; prefer explicit types at boundaries.

@@ -18,6 +18,8 @@ import { usePlatform } from '../hooks/usePlatform';
 import { useBackHandler } from '../hooks/useBackHandler';
 import { clearAllData, forgetDevice, hideMediaNotification, restartApp } from '../services/rokuClient';
 import { remoteStyleLabels } from './remoteStyleTokens';
+import UpdatesSection from './UpdatesSection';
+import { resetUpdates } from '../services/updates';
 
 interface SidebarProps {
     isOpen: boolean;
@@ -146,6 +148,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, scanForDevices, isS
         iconCache.clear();
         useAppStore.persist.clearStorage();
         resetState();
+        resetUpdates();
         setConfirmDeleteOpen(false);
         setSettingsOpen(false);
 
@@ -349,7 +352,11 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, scanForDevices, isS
                     <Typography variant="caption" color="textSecondary">
                         Applies to the remote on mobile and desktop.
                     </Typography>
-                    
+
+                    <Divider sx={{ my: 2 }} />
+
+                    <UpdatesSection phone={isMobilePlatform} />
+
                     <Divider sx={{ my: 2 }} />
                     
                     <Typography variant="subtitle2" color="textSecondary">
