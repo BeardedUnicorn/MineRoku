@@ -6,7 +6,7 @@ heading into the new version's. Each section becomes that release's notes on
 GitHub, and the in-app update dialog shows the sections since the installed
 version (README's "Releasing").
 
-## Unreleased
+## 0.3.0 – 2026-11-23
 
 ### Added
 - Android home-screen widget: a remote you can use without opening the app. At its smallest it is a row of TV controls (power, volume down, play/pause, volume up, mute); make it taller for the full remote with the D-pad, OK, Back, Home, Info and rewind/fast-forward. Each widget is set up with its own Roku, so you can keep one per TV, and it follows that Roku if its address changes.
