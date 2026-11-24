@@ -83,6 +83,20 @@ impl DatabaseManager {
             [],
         )?;
 
+        // Legacy installs created `apps` with FOREIGN KEY (device_ip) REFERENCES devices(ip).
+        // Since devices is keyed by hardware_id, ip is no longer unique, and SQLite rejects
+        // every write to either table with "foreign key mismatch". apps is only a cache, so
+        // drop it and let the CREATE below rebuild it without the key. This runs before the
+        // devices migration so dropping an IP-keyed devices table can't cascade through it.
+        let apps_has_fk: bool = conn.query_row(
+            "SELECT COUNT(*) FROM pragma_foreign_key_list('apps')",
+            [],
+            |row| row.get::<_, i64>(0),
+        )? > 0;
+        if apps_has_fk {
+            conn.execute("DROP TABLE apps", [])?;
+        }
+
         // Check if old devices table exists and needs migration
         let has_hardware_id: bool = {
             let mut stmt = conn.prepare(
@@ -533,5 +547,112 @@ mod tests {
 
         assert_eq!(db.delete_device("roku:missing").unwrap(), None);
         assert_eq!(db.get_devices().unwrap().len(), 1);
+    }
+
+    /// The `apps` table as created before devices were keyed by hardware_id.
+    const LEGACY_APPS_TABLE: &str = "CREATE TABLE apps (
+        device_ip TEXT NOT NULL,
+        app_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        version TEXT NOT NULL,
+        cached_at INTEGER NOT NULL,
+        PRIMARY KEY (device_ip, app_id),
+        FOREIGN KEY (device_ip) REFERENCES devices(ip) ON DELETE CASCADE
+    )";
+
+    /// A database file that `DatabaseManager::new` can reopen. Removed on drop.
+    struct TempDb(std::path::PathBuf);
+
+    impl TempDb {
+        fn new(name: &str) -> Self {
+            let path = std::env::temp_dir()
+                .join(format!("roku_cache_{name}_{}.db", std::process::id()));
+            let _ = std::fs::remove_file(&path);
+            TempDb(path)
+        }
+
+        fn path(&self) -> &str {
+            self.0.to_str().unwrap()
+        }
+    }
+
+    impl Drop for TempDb {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+
+    fn apps_foreign_keys(db: &DatabaseManager) -> i64 {
+        db.conn
+            .lock()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_list('apps')", [], |row| row.get(0))
+            .unwrap()
+    }
+
+    #[test]
+    fn new_drops_the_stale_apps_foreign_key_left_by_the_hardware_id_migration() {
+        let file = TempDb::new("stale_apps_fk");
+        {
+            let conn = Connection::open(file.path()).unwrap();
+            conn.execute_batch(&format!(
+                "CREATE TABLE devices (
+                    hardware_id TEXT PRIMARY KEY,
+                    ip TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    port INTEGER NOT NULL,
+                    url TEXT NOT NULL,
+                    last_seen INTEGER NOT NULL
+                );
+                {LEGACY_APPS_TABLE};
+                INSERT INTO devices VALUES ('roku:A', '10.0.0.2', 'Roku A', 8060, 'http://10.0.0.2:8060', 1);"
+            ))
+            .unwrap();
+            let err = conn
+                .execute("DELETE FROM devices WHERE hardware_id = 'roku:A'", [])
+                .unwrap_err();
+            assert!(err.to_string().contains("foreign key mismatch"), "{err}");
+        }
+
+        let db = DatabaseManager::new(file.path()).unwrap();
+
+        assert_eq!(apps_foreign_keys(&db), 0);
+        db.cache_app_list("10.0.0.2", &[app("12")]).unwrap();
+        assert_eq!(db.get_apps("10.0.0.2").unwrap().len(), 1);
+        assert_eq!(db.delete_device("roku:A").unwrap().as_deref(), Some("10.0.0.2"));
+        assert!(db.get_devices().unwrap().is_empty());
+        assert!(db.get_apps("10.0.0.2").unwrap().is_empty());
+        db.cache_device(&device("roku:B", "10.0.0.3")).unwrap();
+        db.clear_all_data().unwrap();
+    }
+
+    #[test]
+    fn new_upgrades_the_original_ip_keyed_schema() {
+        let file = TempDb::new("ip_keyed");
+        {
+            let conn = Connection::open(file.path()).unwrap();
+            conn.execute_batch(&format!(
+                "CREATE TABLE devices (
+                    ip TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    port INTEGER NOT NULL,
+                    url TEXT NOT NULL,
+                    last_seen INTEGER NOT NULL
+                );
+                {LEGACY_APPS_TABLE};
+                INSERT INTO devices VALUES ('10.0.0.2', 'Roku A', 8060, 'http://10.0.0.2:8060', 1);
+                INSERT INTO apps VALUES ('10.0.0.2', '12', 'App 12', '1.0', 1);"
+            ))
+            .unwrap();
+        }
+
+        let db = DatabaseManager::new(file.path()).unwrap();
+
+        assert_eq!(apps_foreign_keys(&db), 0);
+        assert!(db.get_devices().unwrap().is_empty());
+        db.cache_device(&device("roku:A", "10.0.0.2")).unwrap();
+        db.cache_app_list("10.0.0.2", &[app("12")]).unwrap();
+        assert_eq!(db.delete_device("roku:A").unwrap().as_deref(), Some("10.0.0.2"));
+        assert!(db.get_apps("10.0.0.2").unwrap().is_empty());
     }
 }
