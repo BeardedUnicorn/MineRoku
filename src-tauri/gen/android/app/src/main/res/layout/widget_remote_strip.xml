@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The widget at its smallest: one row of TV controls. Only views RemoteViews can inflate. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@android:id/background"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_background"
+    android:clipToOutline="true"
+    android:padding="6dp"
+    tools:ignore="UseAppTint"
+    tools:targetApi="31">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:baselineAligned="false"
+        android:orientation="horizontal">
+        <ImageButton
+            android:id="@+id/btn_power"
+            style="@style/WidgetButton"
+            android:contentDescription="@string/action_power"
+            android:src="@drawable/ic_remote_power"
+            android:tint="@color/widget_error" />
+        <ImageButton
+            android:id="@+id/btn_vol_down"
+            style="@style/WidgetButton"
+            android:contentDescription="@string/action_volume_down"
+            android:src="@drawable/ic_remote_volume_down" />
+        <ImageButton
+            android:id="@+id/btn_play_pause"
+            style="@style/WidgetButton"
+            android:contentDescription="@string/action_play_pause"
+            android:src="@drawable/ic_remote_play_pause" />
+        <ImageButton
+            android:id="@+id/btn_vol_up"
+            style="@style/WidgetButton"
+            android:contentDescription="@string/action_volume_up"
+            android:src="@drawable/ic_remote_volume_up" />
+        <ImageButton
+            android:id="@+id/btn_mute"
+            style="@style/WidgetButton"
+            android:contentDescription="@string/action_mute"
+            android:src="@drawable/ic_remote_volume_mute" />
+    </LinearLayout>
+
+    <!-- Covers the buttons for a moment to say what happened. -->
+    <TextView
+        android:id="@+id/widget_status"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@drawable/widget_background"
+        android:gravity="center"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:singleLine="true"
+        android:ellipsize="end"
+        android:textColor="@color/widget_on_surface"
+        android:textSize="14sp"
+        android:visibility="gone" />
+</FrameLayout>

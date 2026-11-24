@@ -80,6 +80,9 @@ class MainActivity : TauriActivity() {
 
     override fun onStop() {
         started = false
+        // Widgets follow what was done in the app: a Roku forgotten or found at a new address,
+        // local network access granted.
+        RemoteWidgetProvider.refreshAll(applicationContext)
         super.onStop()
     }
 

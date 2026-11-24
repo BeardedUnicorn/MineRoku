@@ -1,4 +1,42 @@
 <resources>
     <string name="app_name">Roku Remote</string>
     <string name="main_activity_title">Roku Remote</string>
+
+    <!-- Remote buttons: the lock-screen controls and the home-screen widget -->
+    <string name="action_power">Power</string>
+    <string name="action_volume_down">Volume down</string>
+    <string name="action_volume_up">Volume up</string>
+    <string name="action_mute">Mute</string>
+    <string name="action_play">Play</string>
+    <string name="action_pause">Pause</string>
+    <string name="action_play_pause">Play or pause</string>
+    <string name="action_rewind">Rewind</string>
+    <string name="action_forward">Fast forward</string>
+    <string name="action_home">Home</string>
+    <string name="action_back">Back</string>
+    <string name="action_info">Info</string>
+    <string name="action_up">Up</string>
+    <string name="action_down">Down</string>
+    <string name="action_left">Left</string>
+    <string name="action_right">Right</string>
+    <string name="action_ok">OK</string>
+
+    <!-- Lock-screen controls -->
+    <string name="media_channel_name">Roku remote controls</string>
+    <string name="media_channel_description">Volume, play/pause and power for your Roku on the lock screen</string>
+    <string name="status_unreachable">Couldn\'t reach the Roku</string>
+
+    <!-- Home-screen widget -->
+    <string name="widget_label">Roku Remote</string>
+    <string name="widget_description">Control a Roku from your home screen. Enlarge it for the full remote.</string>
+    <string name="widget_tap_to_set_up">Tap to choose a Roku</string>
+    <string name="widget_needs_local_network">Open Roku Remote to allow local network access</string>
+    <string name="widget_unreachable">Couldn\'t reach %1$s</string>
+    <string name="widget_power_on">Turning on…</string>
+    <string name="widget_power_off">Turning off…</string>
+    <string name="widget_power_toggled">Power sent</string>
+    <string name="widget_open_app">Open Roku Remote</string>
+    <string name="widget_config_title">Choose a Roku for this widget</string>
+    <string name="widget_config_loading">Loading…</string>
+    <string name="widget_config_empty">No Roku devices saved yet. Open Roku Remote and scan for your Roku, then come back to this widget.</string>
 </resources>

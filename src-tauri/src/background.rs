@@ -303,6 +303,50 @@ impl DatabaseManager {
     }
 }
 
+/// Reads the saved devices straight from the database file, newest first, without the background
+/// task system. The Android widget uses this in a process where the app itself never started.
+/// It only reads: a missing file, or one from before devices had a hardware ID, has no devices.
+pub fn read_saved_devices(db_path: &str) -> Result<Vec<DeviceCache>, String> {
+    if !std::path::Path::new(db_path).exists() {
+        return Ok(Vec::new());
+    }
+
+    let conn = Connection::open_with_flags(db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .map_err(|e| e.to_string())?;
+    conn.busy_timeout(std::time::Duration::from_secs(1))
+        .map_err(|e| e.to_string())?;
+
+    let mut stmt = match conn.prepare(
+        "SELECT hardware_id, ip, name, port, url, last_seen FROM devices ORDER BY last_seen DESC",
+    ) {
+        Ok(stmt) => stmt,
+        Err(e) => {
+            let message = e.to_string();
+            if message.contains("no such table") || message.contains("no such column") {
+                return Ok(Vec::new());
+            }
+            return Err(message);
+        }
+    };
+
+    let devices = stmt
+        .query_map([], |row| {
+            Ok(DeviceCache {
+                hardware_id: row.get(0)?,
+                ip: row.get(1)?,
+                name: row.get(2)?,
+                port: row.get(3)?,
+                url: row.get(4)?,
+                last_seen: row.get(5)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+
+    devices
+        .collect::<SqliteResult<Vec<_>>>()
+        .map_err(|e| e.to_string())
+}
+
 pub fn init_background_tasks(db_path: String) -> Result<(), Box<dyn std::error::Error>> {
     let (tx, mut rx) = mpsc::unbounded_channel::<BackgroundTask>();
     
@@ -580,6 +624,52 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_file(&self.0);
         }
+    }
+
+    #[test]
+    fn read_saved_devices_lists_devices_newest_first() {
+        let file = TempDb::new("read_saved");
+        {
+            let db = DatabaseManager::new(file.path()).unwrap();
+            db.cache_device(&device("roku:A", "10.0.0.2")).unwrap();
+            let mut newer = device("roku:B", "10.0.0.3");
+            newer.last_seen = 5;
+            db.cache_device(&newer).unwrap();
+        }
+
+        let devices = read_saved_devices(file.path()).unwrap();
+
+        let ids: Vec<&str> = devices.iter().map(|d| d.hardware_id.as_str()).collect();
+        assert_eq!(ids, ["roku:B", "roku:A"]);
+        assert_eq!(devices[0].ip, "10.0.0.3");
+        assert_eq!(devices[0].port, 8060);
+    }
+
+    #[test]
+    fn read_saved_devices_is_empty_without_a_database() {
+        let file = TempDb::new("read_missing");
+        assert!(read_saved_devices(file.path()).unwrap().is_empty());
+        assert!(!file.0.exists(), "reading must not create the database");
+    }
+
+    #[test]
+    fn read_saved_devices_is_empty_for_a_database_without_usable_devices() {
+        let no_table = TempDb::new("read_no_table");
+        Connection::open(no_table.path())
+            .unwrap()
+            .execute_batch("CREATE TABLE icons (device_ip TEXT)")
+            .unwrap();
+        assert!(read_saved_devices(no_table.path()).unwrap().is_empty());
+
+        let ip_keyed = TempDb::new("read_ip_keyed");
+        Connection::open(ip_keyed.path())
+            .unwrap()
+            .execute_batch(
+                "CREATE TABLE devices (ip TEXT PRIMARY KEY, name TEXT, port INTEGER, url TEXT, last_seen INTEGER);
+                 INSERT INTO devices VALUES ('10.0.0.2', 'Roku A', 8060, 'http://10.0.0.2:8060', 1);",
+            )
+            .unwrap();
+        assert!(read_saved_devices(ip_keyed.path()).unwrap().is_empty());
     }
 
     fn apps_foreign_keys(db: &DatabaseManager) -> i64 {

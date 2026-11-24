@@ -3,6 +3,8 @@ package com.rokucontroller.remote
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.os.Handler
+import android.os.Looper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -23,6 +25,11 @@ class MediaControlReceiver : BroadcastReceiver() {
         private const val SEND_TIMEOUT_MS = 8_000L
 
         private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    }
+
+    /** The manager's state lives on the main thread. */
+    private fun reportFailure() {
+        Handler(Looper.getMainLooper()).post { MediaSessionManager.peek()?.onActionFailed() }
     }
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -57,8 +64,14 @@ class MediaControlReceiver : BroadcastReceiver() {
                 val send = scope.async { MediaSessionManager.sendCommandBlocking(ip, port, command) }
                 when (withTimeoutOrNull(SEND_TIMEOUT_MS) { send.await() }) {
                     true -> Unit
-                    false -> android.util.Log.w(TAG, "Roku command failed: $command")
-                    null -> android.util.Log.w(TAG, "Roku command timed out: $command")
+                    false -> {
+                        android.util.Log.w(TAG, "Roku command failed: $command")
+                        reportFailure()
+                    }
+                    null -> {
+                        android.util.Log.w(TAG, "Roku command timed out: $command")
+                        reportFailure()
+                    }
                 }
             } catch (e: Exception) {
                 android.util.Log.e(TAG, "Failed to handle command $command: ${e.message}", e)

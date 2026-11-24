@@ -15,6 +15,6 @@ describe('RemoteButtonSpecs', () => {
   });
 
   it('defines power control', () => {
-    expect(powerButtonSpecs[0].key).toBe('PowerOff');
+    expect(powerButtonSpecs[0].key).toBe('Power');
   });
 });

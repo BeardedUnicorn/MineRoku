@@ -152,6 +152,17 @@ export async function sendRokuCommand(
   return invoke<string>('send_roku_command', { ip, port, command });
 }
 
+/** The key `toggleRokuPower` is asked for; it is not sent to the Roku as it is. */
+export const POWER_TOGGLE_COMMAND = 'Power';
+
+/**
+ * Turns the TV on when it is in standby and off when it is on. Resolves with the key that was
+ * sent: "PowerOn", "PowerOff", or "Power" when the TV didn't say which state it is in.
+ */
+export async function toggleRokuPower(ip: string, port: number): Promise<string> {
+  return invoke<string>('toggle_roku_power', { ip, port });
+}
+
 export async function launchRokuApp(ip: string, port: number, appId: string): Promise<string> {
   return invoke<string>('launch_roku_app', { ip, port, appId });
 }

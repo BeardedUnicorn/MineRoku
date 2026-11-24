@@ -53,6 +53,7 @@ Short GIF showing navigation and launching an app:
 - **Remote Control**: Full remote control with navigation, playback, and system controls
 - **App Management**: View, browse, and launch installed apps on your Roku device
 - **Multiple Device Support**: Switch between multiple Roku devices seamlessly
+- **Android Widget and Lock Screen**: A home-screen remote widget, and volume, play/pause and power on the lock screen
 
 ### Enhanced UI/UX
 - **Material-UI Design**: Modern, responsive interface with dark theme
@@ -122,7 +123,12 @@ Short GIF showing navigation and launching an app:
    - **Navigation Pad**: Use arrow buttons and OK button for menu navigation
    - **Control Buttons**: Home, Back, and Info buttons
    - **Playback Controls**: Play/Pause, Rewind, Fast Forward
-   - **Additional Controls**: Search and Enter buttons
+   - **Volume and Power**: Volume up/down, mute, and a power button that turns a Roku TV on or off
+
+### Android Widget and Lock Screen
+- **Widget**: Long-press the home screen, choose Widgets, and add "Roku Remote". Pick the Roku it should control (open the app and scan first if the list is empty). At 4×1 it is a row of power, volume, play/pause and mute; drag it taller for the full remote with the D-pad. It works with the app closed. Add one widget per TV if you have several. To change a widget's Roku, long-press it and tap the edit (pencil) button.
+- **Lock screen**: While the app is open, the media controls on the lock screen and in the notification shade show volume down, play/pause, volume up, mute and power. Android removes them some time after the app is closed; the widget stays.
+- Power-on needs the TV to stay on the network in standby ("Fast TV Start" in the Roku's settings).
 
 ### App Management
 1. Select a device from the device list

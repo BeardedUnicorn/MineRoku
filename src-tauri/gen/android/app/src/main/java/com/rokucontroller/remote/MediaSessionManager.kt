@@ -47,6 +47,22 @@ class MediaSessionManager private constructor(context: Context) {
         const val NOTIFICATION_ID = 1001
         const val ACTION_PREFIX = "com.rokucontroller.remote.MEDIA_ACTION."
         const val ACTION_DISMISSED = "com.rokucontroller.remote.MEDIA_DISMISSED"
+
+        /** Not an ECP key: turns the TV on from standby and off when it is on. */
+        const val CMD_POWER_TOGGLE = "power_toggle"
+        const val CMD_PLAY_PAUSE = "play_pause"
+        const val CMD_VOLUME_DOWN = "VolumeDown"
+        const val CMD_VOLUME_UP = "VolumeUp"
+        const val CMD_VOLUME_MUTE = "VolumeMute"
+
+        // The session's custom actions, in the order the system media player lays them out
+        // around play/pause: volume down, [play/pause], volume up, mute, power.
+        private val CUSTOM_ACTIONS =
+            listOf(CMD_VOLUME_DOWN, CMD_VOLUME_UP, CMD_VOLUME_MUTE, CMD_POWER_TOGGLE)
+
+        private const val RESYNC_DELAY_MS = 1_500L
+        private const val STATUS_LABEL_MS = 1_500L
+        private const val FAILURE_LABEL_MS = 3_000L
         private const val TAG = "RokuMediaSession"
 
         @Volatile
@@ -58,6 +74,15 @@ class MediaSessionManager private constructor(context: Context) {
 
         @JvmStatic
         private external fun nativeGetAppIconDataUrl(ip: String, port: Int, appId: String): String?
+
+        @JvmStatic
+        private external fun nativeTogglePower(ip: String, port: Int): String?
+
+        @JvmStatic
+        private external fun nativeListSavedDevices(dbPath: String): String?
+
+        @JvmStatic
+        private external fun nativeQueryIsPlaying(ip: String, port: Int): Int
 
         init {
             System.loadLibrary("roku_controller_lib")
@@ -75,9 +100,35 @@ class MediaSessionManager private constructor(context: Context) {
 
         /** Blocking; call from a background thread. Needs no manager instance. */
         fun sendCommandBlocking(ip: String, port: Int, command: String): Boolean {
-            val actualCommand = if (command == "play_pause") "play" else command
+            if (command == CMD_POWER_TOGGLE) {
+                return togglePowerBlocking(ip, port) != null
+            }
+            val actualCommand = if (command == CMD_PLAY_PAUSE) "play" else command
             return nativeSendRokuCommand(ip, port, actualCommand)
         }
+
+        /**
+         * Turns the TV on or off depending on its current state. Returns the key that was sent
+         * ("PowerOn", "PowerOff" or "Power"), or null when the device couldn't be reached.
+         * Blocking; needs no manager instance.
+         */
+        fun togglePowerBlocking(ip: String, port: Int): String? =
+            nativeTogglePower(ip, port)?.takeIf { it.isNotEmpty() }
+
+        /**
+         * The saved devices as a JSON array, read from the app's database file, or null when it
+         * couldn't be read. Blocking; works in a process where the app itself never started.
+         */
+        fun savedDevicesJson(dbPath: String): String? =
+            nativeListSavedDevices(dbPath)?.takeIf { it.isNotEmpty() }
+
+        /** Whether the device is playing, or null when it didn't answer. Blocking. */
+        fun queryIsPlayingBlocking(ip: String, port: Int): Boolean? =
+            when (nativeQueryIsPlaying(ip, port)) {
+                1 -> true
+                0 -> false
+                else -> null
+            }
     }
 
     private val notificationManager =
@@ -92,6 +143,7 @@ class MediaSessionManager private constructor(context: Context) {
     private var isPlaying: Boolean = false
     private var lastActionLabel: String? = null
     private var clearActionJob: Job? = null
+    private var resyncJob: Job? = null
     private val coroutineScope = CoroutineScope(Dispatchers.Main.immediate + SupervisorJob())
 
     init {
@@ -101,20 +153,17 @@ class MediaSessionManager private constructor(context: Context) {
             // calling thread and throws when that thread has no Looper.
             setCallback(
                 object : MediaSessionCompat.Callback() {
-                    override fun onPlay() = onTransportCommand("play", playing = true)
+                    override fun onPlay() = onTransportCommand(CMD_PLAY_PAUSE, playing = true)
 
                     // Roku uses a single toggle for play/pause.
-                    override fun onPause() = onTransportCommand("play", playing = false)
+                    override fun onPause() = onTransportCommand(CMD_PLAY_PAUSE, playing = false)
 
-                    override fun onStop() = onTransportCommand("home", playing = false)
-
-                    override fun onSkipToNext() = onTransportCommand("fwd", playing = null)
-
-                    override fun onSkipToPrevious() = onTransportCommand("rev", playing = null)
-
-                    override fun onFastForward() = onTransportCommand("fwd", playing = null)
-
-                    override fun onRewind() = onTransportCommand("rev", playing = null)
+                    // Volume, mute and power: the system media player's extra buttons.
+                    override fun onCustomAction(action: String?, extras: android.os.Bundle?) {
+                        if (action != null && action in CUSTOM_ACTIONS) {
+                            onTransportCommand(action, playing = null)
+                        }
+                    }
                 },
                 Handler(Looper.getMainLooper()),
             )
@@ -125,10 +174,10 @@ class MediaSessionManager private constructor(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Roku Media Controls",
+                appContext.getString(R.string.media_channel_name),
                 NotificationManager.IMPORTANCE_LOW,
             ).apply {
-                description = "Media playback controls for Roku"
+                description = appContext.getString(R.string.media_channel_description)
                 setShowBadge(false)
                 lockscreenVisibility = Notification.VISIBILITY_PUBLIC
             }
@@ -158,6 +207,7 @@ class MediaSessionManager private constructor(context: Context) {
         currentAppName = appName.ifBlank { "Ready" }
         this.isPlaying = isPlaying
         clearActionJob?.cancel()
+        resyncJob?.cancel()
         lastActionLabel = null
 
         val normalizedAppId = appId?.takeIf { it.isNotBlank() && it != "roku" }
@@ -200,6 +250,7 @@ class MediaSessionManager private constructor(context: Context) {
         active = false
         clearActionJob?.cancel()
         clearActionJob = null
+        resyncJob = null
         lastActionLabel = null
         coroutineScope.coroutineContext.cancelChildren()
         try {
@@ -219,33 +270,70 @@ class MediaSessionManager private constructor(context: Context) {
             return
         }
 
-        val label = when (command) {
-            "play_pause" -> if (isPlaying) "Pause" else "Play"
-            "rev" -> "Rewind"
-            "fwd" -> "Forward"
-            "home" -> "Home"
-            "VolumeDown" -> "Vol -"
-            "VolumeUp" -> "Vol +"
-            else -> null
-        }
-
-        if (command == "play_pause") {
+        // Labelled before the flip: the press did what the button said at the time.
+        showStatus(actionLabel(command), STATUS_LABEL_MS)
+        if (command == CMD_PLAY_PAUSE) {
             isPlaying = !isPlaying
-        } else if (command == "home") {
-            isPlaying = false
         }
-
-        if (label != null) {
-            lastActionLabel = label
-            clearActionJob?.cancel()
-            clearActionJob = coroutineScope.launch {
-                delay(1500)
-                lastActionLabel = null
-                refresh()
-            }
+        if (command == CMD_PLAY_PAUSE || command == CMD_POWER_TOGGLE) {
+            scheduleResync()
         }
 
         refresh()
+    }
+
+    /** Says in the notification that the last button press didn't reach the Roku. Main thread only. */
+    fun onActionFailed() {
+        if (!active) {
+            return
+        }
+        showStatus(appContext.getString(R.string.status_unreachable), FAILURE_LABEL_MS)
+        refresh()
+    }
+
+    private fun actionLabel(command: String): String? {
+        val label = when (command) {
+            CMD_PLAY_PAUSE -> if (isPlaying) R.string.action_pause else R.string.action_play
+            CMD_VOLUME_DOWN -> R.string.action_volume_down
+            CMD_VOLUME_UP -> R.string.action_volume_up
+            CMD_VOLUME_MUTE -> R.string.action_mute
+            CMD_POWER_TOGGLE -> R.string.action_power
+            else -> return null
+        }
+        return appContext.getString(label)
+    }
+
+    /** Shows [label] next to the app name for [durationMs]. The caller refreshes. */
+    private fun showStatus(label: String?, durationMs: Long) {
+        if (label == null) {
+            return
+        }
+        lastActionLabel = label
+        clearActionJob?.cancel()
+        clearActionJob = coroutineScope.launch {
+            delay(durationMs)
+            lastActionLabel = null
+            refresh()
+        }
+    }
+
+    /**
+     * Play/pause is a toggle and power changes what is playing, so the state shown is a guess
+     * until the Roku is asked. Nothing else corrects it while the app is in the background.
+     */
+    private fun scheduleResync() {
+        val ip = currentDeviceIp
+        val port = currentDevicePort
+        resyncJob?.cancel()
+        resyncJob = coroutineScope.launch {
+            delay(RESYNC_DELAY_MS)
+            val playing = withContext(Dispatchers.IO) { queryIsPlayingBlocking(ip, port) }
+                ?: return@launch
+            if (active && currentDeviceIp == ip && currentDevicePort == port && isPlaying != playing) {
+                isPlaying = playing
+                refresh()
+            }
+        }
     }
 
     private fun onTransportCommand(command: String, playing: Boolean?) {
@@ -259,13 +347,19 @@ class MediaSessionManager private constructor(context: Context) {
             val success = withContext(Dispatchers.IO) { sendCommandBlocking(ip, port, command) }
             if (!success) {
                 android.util.Log.w(TAG, "Roku command failed: $command")
+                onActionFailed()
             }
         }
 
         if (playing != null) {
             isPlaying = playing
-            refresh()
+        } else {
+            showStatus(actionLabel(command), STATUS_LABEL_MS)
         }
+        if (command == CMD_PLAY_PAUSE || command == CMD_POWER_TOGGLE) {
+            scheduleResync()
+        }
+        refresh()
     }
 
     private fun decodeDataUrlToBitmap(dataUrl: String?): Bitmap? {
@@ -314,8 +408,9 @@ class MediaSessionManager private constructor(context: Context) {
     private fun updateMetadata() {
         val metadata = MediaMetadataCompat.Builder()
             .putString(MediaMetadataCompat.METADATA_KEY_TITLE, currentDeviceName)
-            .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, currentAppName)
-            .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, "Roku Remote")
+            // The system media player shows this line, not the notification's text.
+            .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, statusLine())
+            .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, appContext.getString(R.string.app_name))
 
         currentAppIcon?.let {
             metadata.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, it)
@@ -332,21 +427,47 @@ class MediaSessionManager private constructor(context: Context) {
             PlaybackStateCompat.STATE_PAUSED
         }
 
-        val playbackState = PlaybackStateCompat.Builder()
+        // Only play/pause is a transport action. With no previous/next, the system media player
+        // (Android 13+) gives those slots to the custom actions, in order.
+        val builder = PlaybackStateCompat.Builder()
             .setActions(
                 PlaybackStateCompat.ACTION_PLAY or
                     PlaybackStateCompat.ACTION_PAUSE or
-                    PlaybackStateCompat.ACTION_PLAY_PAUSE or
-                    PlaybackStateCompat.ACTION_STOP or
-                    PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
-                    PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS or
-                    PlaybackStateCompat.ACTION_FAST_FORWARD or
-                    PlaybackStateCompat.ACTION_REWIND,
+                    PlaybackStateCompat.ACTION_PLAY_PAUSE,
             )
             .setState(state, PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN, 1f)
-            .build()
+
+        for (command in CUSTOM_ACTIONS) {
+            builder.addCustomAction(
+                PlaybackStateCompat.CustomAction.Builder(
+                    command,
+                    appContext.getString(commandLabel(command)),
+                    commandIcon(command),
+                ).build(),
+            )
+        }
+        val playbackState = builder.build()
 
         mediaSession.setPlaybackState(playbackState)
+    }
+
+    private fun statusLine(): String =
+        if (lastActionLabel.isNullOrBlank()) currentAppName else "$currentAppName • $lastActionLabel"
+
+    private fun commandLabel(command: String): Int = when (command) {
+        CMD_VOLUME_DOWN -> R.string.action_volume_down
+        CMD_VOLUME_UP -> R.string.action_volume_up
+        CMD_VOLUME_MUTE -> R.string.action_mute
+        CMD_POWER_TOGGLE -> R.string.action_power
+        else -> if (isPlaying) R.string.action_pause else R.string.action_play
+    }
+
+    private fun commandIcon(command: String): Int = when (command) {
+        CMD_VOLUME_DOWN -> R.drawable.ic_remote_volume_down
+        CMD_VOLUME_UP -> R.drawable.ic_remote_volume_up
+        CMD_VOLUME_MUTE -> R.drawable.ic_remote_volume_mute
+        CMD_POWER_TOGGLE -> R.drawable.ic_remote_power
+        else -> if (isPlaying) R.drawable.ic_remote_pause else R.drawable.ic_remote_play
     }
 
     private fun buildNotification(): Notification {
@@ -369,18 +490,12 @@ class MediaSessionManager private constructor(context: Context) {
 
         val mediaStyle = MediaStyle()
             .setMediaSession(mediaSession.sessionToken)
-            .setShowActionsInCompactView(0, 1, 2) // vol-, play/pause, vol+
-
-        val contentText = if (lastActionLabel.isNullOrBlank()) {
-            currentAppName
-        } else {
-            "$currentAppName • $lastActionLabel"
-        }
+            .setShowActionsInCompactView(0, 1, 2) // volume down, play/pause, volume up
 
         val builder = NotificationCompat.Builder(appContext, CHANNEL_ID)
             .setContentTitle(currentDeviceName)
-            .setContentText(contentText)
-            .setSmallIcon(android.R.drawable.ic_media_play)
+            .setContentText(statusLine())
+            .setSmallIcon(R.drawable.ic_stat_remote)
             .setContentIntent(contentIntent)
             .setDeleteIntent(dismissIntent)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
@@ -393,36 +508,21 @@ class MediaSessionManager private constructor(context: Context) {
 
         currentAppIcon?.let { builder.setLargeIcon(it) }
 
-        builder.addAction(
-            android.R.drawable.ic_lock_silent_mode,
-            "Vol-",
-            createMediaActionPendingIntent("VolumeDown"),
-        )
-        builder.addAction(
-            if (isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
-            if (isPlaying) "Pause" else "Play",
-            createMediaActionPendingIntent("play_pause"),
-        )
-        builder.addAction(
-            android.R.drawable.ic_lock_silent_mode_off,
-            "Vol+",
-            createMediaActionPendingIntent("VolumeUp"),
-        )
-        builder.addAction(
-            android.R.drawable.ic_media_rew,
-            "Rewind",
-            createMediaActionPendingIntent("rev"),
-        )
-        builder.addAction(
-            android.R.drawable.ic_media_ff,
-            "Forward",
-            createMediaActionPendingIntent("fwd"),
-        )
-        builder.addAction(
-            android.R.drawable.ic_delete,
-            "Home",
-            createMediaActionPendingIntent("home"),
-        )
+        // The same five buttons as the session's actions, in the same order. This list is what
+        // Android 12 and older show, and what still works once the process has been killed.
+        for (command in listOf(
+            CMD_VOLUME_DOWN,
+            CMD_PLAY_PAUSE,
+            CMD_VOLUME_UP,
+            CMD_VOLUME_MUTE,
+            CMD_POWER_TOGGLE,
+        )) {
+            builder.addAction(
+                commandIcon(command),
+                appContext.getString(commandLabel(command)),
+                createMediaActionPendingIntent(command),
+            )
+        }
 
         return builder.build()
     }

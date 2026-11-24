@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The full remote: name, D-pad with Back/Home/Info/Power in the corners, playback, volume. Only views RemoteViews can inflate. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@android:id/background"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_background"
+    android:clipToOutline="true"
+    android:padding="6dp"
+    tools:ignore="UseAppTint"
+    tools:targetApi="31"
+    android:orientation="vertical">
+
+    <TextView
+        android:id="@+id/widget_title"
+        style="@style/WidgetTitle"
+        android:layout_height="26dp" />
+
+    <LinearLayout style="@style/WidgetRow">
+        <ImageButton
+            android:id="@+id/btn_back"
+            style="@style/WidgetButton"
+            android:contentDescription="@string/action_back"
+            android:src="@drawable/ic_remote_back" />
+        <ImageButton
+            android:id="@+id/btn_up"
+            style="@style/WidgetButton"
+            android:contentDescription="@string/action_up"
+            android:src="@drawable/ic_remote_up" />
+        <ImageButton
+            android:id="@+id/btn_home"
+            style="@style/WidgetButton"
+            android:contentDescription="@string/action_home"
+            android:src="@drawable/ic_remote_home" />
+    </LinearLayout>
+
+    <LinearLayout style="@style/WidgetRow">
+        <ImageButton
+            android:id="@+id/btn_left"
+            style="@style/WidgetButton"
+            android:contentDescription="@string/action_left"
+            android:src="@drawable/ic_remote_left" />
+        <Button
+            android:id="@+id/btn_ok"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:layout_margin="3dp"
+            android:background="@drawable/widget_button_accent_bg"
+            android:minWidth="0dp"
+            android:minHeight="0dp"
+            android:padding="0dp"
+            android:text="@string/action_ok"
+            android:textAllCaps="false"
+            android:textColor="@color/widget_on_accent"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+        <ImageButton
+            android:id="@+id/btn_right"
+            style="@style/WidgetButton"
+            android:contentDescription="@string/action_right"
+            android:src="@drawable/ic_remote_right" />
+    </LinearLayout>
+
+    <LinearLayout style="@style/WidgetRow">
+        <ImageButton
+            android:id="@+id/btn_info"
+            style="@style/WidgetButton"
+            android:contentDescription="@string/action_info"
+            android:src="@drawable/ic_remote_info" />
+        <ImageButton
+            android:id="@+id/btn_down"
+            style="@style/WidgetButton"
+            android:contentDescription="@string/action_down"
+            android:src="@drawable/ic_remote_down" />
+        <ImageButton
+            android:id="@+id/btn_power"
+            style="@style/WidgetButton"
+            android:contentDescription="@string/action_power"
+            android:src="@drawable/ic_remote_power"
+            android:tint="@color/widget_error" />
+    </LinearLayout>
+
+    <LinearLayout style="@style/WidgetRow">
+        <ImageButton
+            android:id="@+id/btn_rev"
+            style="@style/WidgetButton"
+            android:contentDescription="@string/action_rewind"
+            android:src="@drawable/ic_remote_rewind" />
+        <ImageButton
+            android:id="@+id/btn_play_pause"
+            style="@style/WidgetButton"
+            android:contentDescription="@string/action_play_pause"
+            android:src="@drawable/ic_remote_play_pause" />
+        <ImageButton
+            android:id="@+id/btn_fwd"
+            style="@style/WidgetButton"
+            android:contentDescription="@string/action_forward"
+            android:src="@drawable/ic_remote_forward" />
+    </LinearLayout>
+
+    <LinearLayout style="@style/WidgetRow">
+        <ImageButton
+            android:id="@+id/btn_vol_down"
+            style="@style/WidgetButton"
+            android:contentDescription="@string/action_volume_down"
+            android:src="@drawable/ic_remote_volume_down" />
+        <ImageButton
+            android:id="@+id/btn_mute"
+            style="@style/WidgetButton"
+            android:contentDescription="@string/action_mute"
+            android:src="@drawable/ic_remote_volume_mute" />
+        <ImageButton
+            android:id="@+id/btn_vol_up"
+            style="@style/WidgetButton"
+            android:contentDescription="@string/action_volume_up"
+            android:src="@drawable/ic_remote_volume_up" />
+    </LinearLayout>
+</LinearLayout>

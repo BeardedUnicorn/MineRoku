@@ -9,6 +9,7 @@ import VolumeUpIcon from '@mui/icons-material/VolumeUp';
 import VolumeDownIcon from '@mui/icons-material/VolumeDown';
 import VolumeMuteIcon from '@mui/icons-material/VolumeMute';
 import PowerSettingsNewIcon from '@mui/icons-material/PowerSettingsNew';
+import { POWER_TOGGLE_COMMAND } from '../services/rokuClient';
 
 export interface CommandSpec {
   key: string;
@@ -36,5 +37,5 @@ export const playbackButtonSpecs: CommandSpec[] = [
 ];
 
 export const powerButtonSpecs: CommandSpec[] = [
-  { key: 'PowerOff', icon: <PowerSettingsNewIcon />, label: 'Power Off' },
+  { key: POWER_TOGGLE_COMMAND, icon: <PowerSettingsNewIcon />, label: 'Power' },
 ];

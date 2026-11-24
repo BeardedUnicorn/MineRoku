@@ -13,7 +13,7 @@ use commands::{
     check_device_connectivity_impl, clear_memory_caches, discover_roku_devices_impl,
     forget_device_impl, get_active_app_impl, get_app_icon_impl, get_media_player_impl,
     launch_roku_app_impl, list_roku_apps_impl, send_roku_command_impl, test_network_connectivity,
-    ActiveAppInfo, MediaPlayerInfo, RokuApp, RokuDevice,
+    toggle_power_impl, ActiveAppInfo, MediaPlayerInfo, RokuApp, RokuDevice,
 };
 
 use background::init_background_tasks;
@@ -24,7 +24,9 @@ use tauri_plugin_opener::init as opener;
 
 #[cfg(target_os = "android")]
 mod android {
-    use super::{get_app_icon_impl, send_roku_command_impl};
+    use super::{
+        get_app_icon_impl, get_media_player_impl, send_roku_command_impl, toggle_power_impl,
+    };
     use jni::errors::LogErrorAndDefault;
     use jni::objects::{JClass, JObject, JString};
     use jni::refs::Global;
@@ -412,6 +414,85 @@ mod android {
             })
             .resolve::<LogErrorAndDefault>()
     }
+
+    /// Flips the TV's power. Returns the key that was sent, or an empty string on failure.
+    #[no_mangle]
+    pub extern "system" fn Java_com_rokucontroller_remote_MediaSessionManager_nativeTogglePower<
+        'caller,
+    >(
+        mut unowned_env: EnvUnowned<'caller>,
+        _class: JClass<'caller>,
+        ip: JString<'caller>,
+        port: jint,
+    ) -> JString<'caller> {
+        unowned_env
+            .with_env(|env| -> jni::errors::Result<JString<'caller>> {
+                init_logging();
+                let ip = ip.try_to_string(env)?;
+
+                let sent = tauri::async_runtime::block_on(toggle_power_impl(ip, port as u16))
+                    .unwrap_or_else(|e| {
+                        log::warn!("Power toggle failed: {e}");
+                        String::new()
+                    });
+
+                env.new_string(sent)
+            })
+            .resolve::<LogErrorAndDefault>()
+    }
+
+    /// The saved devices as a JSON array, read straight from the database file so it works in a
+    /// process where `run()` never did. An empty string means the read failed.
+    #[no_mangle]
+    pub extern "system" fn Java_com_rokucontroller_remote_MediaSessionManager_nativeListSavedDevices<
+        'caller,
+    >(
+        mut unowned_env: EnvUnowned<'caller>,
+        _class: JClass<'caller>,
+        db_path: JString<'caller>,
+    ) -> JString<'caller> {
+        unowned_env
+            .with_env(|env| -> jni::errors::Result<JString<'caller>> {
+                init_logging();
+                let db_path = db_path.try_to_string(env)?;
+
+                let json = match crate::background::read_saved_devices(&db_path) {
+                    Ok(devices) => serde_json::to_string(&devices).unwrap_or_default(),
+                    Err(e) => {
+                        log::warn!("Reading saved devices failed: {e}");
+                        String::new()
+                    }
+                };
+
+                env.new_string(json)
+            })
+            .resolve::<LogErrorAndDefault>()
+    }
+
+    /// 1 when something is playing, 0 when not, -1 when the device didn't answer.
+    #[no_mangle]
+    pub extern "system" fn Java_com_rokucontroller_remote_MediaSessionManager_nativeQueryIsPlaying<
+        'caller,
+    >(
+        mut unowned_env: EnvUnowned<'caller>,
+        _class: JClass<'caller>,
+        ip: JString<'caller>,
+        port: jint,
+    ) -> jint {
+        unowned_env
+            .with_env(|env| -> jni::errors::Result<jint> {
+                init_logging();
+                let ip = ip.try_to_string(env)?;
+
+                Ok(
+                    match tauri::async_runtime::block_on(get_media_player_impl(ip, port as u16)) {
+                        Ok(info) => (info.state == "play" || info.state == "playing") as jint,
+                        Err(_) => -1,
+                    },
+                )
+            })
+            .resolve::<LogErrorAndDefault>()
+    }
 }
 
 #[command]
@@ -462,6 +543,12 @@ async fn list_roku_apps(ip: String, port: u16) -> Result<Vec<RokuApp>, String> {
 #[command]
 async fn send_roku_command(ip: String, port: u16, command: String) -> Result<String, String> {
     send_roku_command_impl(ip, port, command).await
+}
+
+/// Turns the TV on from standby or off when it is on. Returns the key that was sent.
+#[command]
+async fn toggle_roku_power(ip: String, port: u16) -> Result<String, String> {
+    toggle_power_impl(ip, port).await
 }
 
 #[command]
@@ -689,6 +776,7 @@ pub fn run() {
             discover_roku_devices,
             list_roku_apps,
             send_roku_command,
+            toggle_roku_power,
             launch_roku_app,
             get_active_app,
             get_app_icon,

@@ -51,6 +51,37 @@
             android:name=".MediaControlReceiver"
             android:exported="false" />
 
+        <!-- The home-screen remote. Exported because the launcher drives it; it only draws. -->
+        <receiver
+            android:name=".RemoteWidgetProvider"
+            android:exported="true"
+            android:label="@string/widget_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/remote_widget_info" />
+        </receiver>
+
+        <!-- The widget's buttons; targeted by explicit intents only, so no other app can
+             send keys to the TV. -->
+        <receiver
+            android:name=".WidgetActionReceiver"
+            android:exported="false" />
+
+        <!-- Chooses a widget's Roku. The launcher opens it. -->
+        <activity
+            android:name=".RemoteWidgetConfigActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.RokuWidgetConfig">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
+
         <provider
           android:name="androidx.core.content.FileProvider"
           android:authorities="${applicationId}.fileprovider"
