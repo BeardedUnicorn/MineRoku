@@ -46,7 +46,9 @@ import {
   getMediaPlayer,
   hapticTap,
   openAndroidAppSettings,
+  POWER_TOGGLE_COMMAND,
   sendRokuCommand,
+  toggleRokuPower,
   updateMediaNotification,
   type ActiveAppInfo,
   type MediaPlayerInfo,
@@ -527,7 +529,12 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
           if (generation !== queueGenerationRef.current) {
             return;
           }
-          await sendRokuCommand(device.ip, device.port, command);
+          if (command === POWER_TOGGLE_COMMAND) {
+            // On or off, whichever the TV isn't.
+            await toggleRokuPower(device.ip, device.port);
+          } else {
+            await sendRokuCommand(device.ip, device.port, command);
+          }
         } catch (error) {
           console.error(`Error sending command ${command}:`, error);
           queueGenerationRef.current += 1;

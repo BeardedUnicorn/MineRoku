@@ -97,6 +97,20 @@ describe('RemoteControl', () => {
     expect(invoke).toHaveBeenCalledWith('send_roku_command', { ip: device.ip, port: device.port, command: 'up' });
   });
 
+  it('asks for a power toggle instead of sending a power key', async () => {
+    renderWithTheme(<RemoteControl device={device} />);
+
+    await userEvent.click(await screen.findByLabelText('Power'));
+
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith('toggle_roku_power', { ip: device.ip, port: device.port })
+    );
+    expect(invoke).not.toHaveBeenCalledWith(
+      'send_roku_command',
+      expect.objectContaining({ command: expect.stringMatching(/^Power/) })
+    );
+  });
+
   it('shows error feedback when command fails', async () => {
     vi.mocked(invoke).mockImplementation((cmd: string) => {
       if (cmd === 'send_roku_command') {
