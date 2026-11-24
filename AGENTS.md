@@ -6,7 +6,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the runtime topology, IPC surface, SQ
 - Frontend (`src/`): React + TypeScript app. Components in `src/components/`, hooks in `src/hooks/`, Tauri command wrappers in `src/services/rokuClient.ts`, Zustand store in `src/store.ts`, styles in `src/*.css`.
 - Backend (`src-tauri/`): Tauri 2 Rust app (`src-tauri/src/{main.rs,lib.rs,commands.rs,background.rs,background_discovery.rs}`), config in `src-tauri/tauri.conf.json`.
 - Rust crates (`crates/`): vendored forks. `crates/roku` is the ECP client. `crates/ssdp-client` is the SSDP library used for device discovery: a vendored copy of upstream v2.1.0 carrying Android patches in `src/search.rs` (binds SSDP to `wlan0` to bypass VPNs), so don't swap it for the crates.io release.
-- Android (`src-tauri/gen/android/`): Kotlin sources for MediaSession and permissions under `app/src/main/java/com/rokucontroller/remote/`.
+- Android (`src-tauri/gen/android/`): Kotlin sources for the lock-screen MediaSession, the home-screen widget and permissions under `app/src/main/java/com/rokucontroller/remote/`; widget layouts and icons under `app/src/main/res/`.
 - Assets: `public/` (static), `src/assets/` (bundled), icons under `src-tauri/icons/`.
 - Tests: colocated as `*.test.tsx` under `src/` with setup in `src/setupTests.ts` and shared helpers in `src/testUtils.tsx`.
 

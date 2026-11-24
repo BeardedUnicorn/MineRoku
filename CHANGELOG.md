@@ -6,6 +6,21 @@ heading into the new version's. Each section becomes that release's notes on
 GitHub, and the in-app update dialog shows the sections since the installed
 version (README's "Releasing").
 
+## Unreleased
+
+### Added
+- Android home-screen widget: a remote you can use without opening the app. At its smallest it is a row of TV controls (power, volume down, play/pause, volume up, mute); make it taller for the full remote with the D-pad, OK, Back, Home, Info and rewind/fast-forward. Each widget is set up with its own Roku, so you can keep one per TV, and it follows that Roku if its address changes.
+- The power button turns the TV on as well as off. It checks whether the TV is on and sends the right key, in the app, on the widget and on the lock screen.
+
+### Changed
+- Android lock-screen controls are now volume down, play/pause, volume up, mute and power. On Android 13 and newer the old volume and Home buttons never appeared there; only play/pause and rewind/forward did. Rewind and fast-forward are on the widget and in the app.
+- The lock-screen controls have proper volume and power icons, show "Couldn't reach the Roku" when a press fails, and re-check whether something is playing after play/pause or power.
+
+### Known limitations
+- Turning a TV on only works if it stays on the network in standby (Roku's "Fast TV Start"). Streaming sticks and boxes have no power control.
+- The widget's play/pause button doesn't show whether something is playing.
+- Changing a widget's Roku needs Android 12 or newer; on older versions remove the widget and add it again.
+
 ## 0.2.0 – 2026-11-23
 
 ### Added

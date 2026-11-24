@@ -1,6 +1,6 @@
 # Architecture
 
-Roku Remote is a Tauri 2 application: a React + TypeScript UI runs in a webview, a Rust core runs in the host process, and the two communicate over Tauri IPC. The Rust core talks to Roku boxes on the local network via SSDP (discovery) and the Roku External Control Protocol over HTTP (control + status). A small SQLite file caches devices, app lists, and app icons across launches. On Android, a Kotlin layer mirrors part of the UI as a MediaSession so transport controls work from the lock screen and notification shade.
+Roku Remote is a Tauri 2 application: a React + TypeScript UI runs in a webview, a Rust core runs in the host process, and the two communicate over Tauri IPC. The Rust core talks to Roku boxes on the local network via SSDP (discovery) and the Roku External Control Protocol over HTTP (control + status). A small SQLite file caches devices, app lists, and app icons across launches. On Android, a Kotlin layer mirrors part of the UI as a MediaSession, so volume, play/pause and power work from the lock screen and notification shade, and as a home-screen widget that is a remote of its own.
 
 This document is the map. The [README](README.md) covers what the app *does*; this covers how it's wired.
 
@@ -34,7 +34,7 @@ This document is the map. The [README](README.md) covers what the app *does*; th
 
 - The webview never reaches a device directly. Everything device-facing goes through Tauri commands so platform quirks (Android permissions, multicast locks) stay in Rust.
 - Background work — periodic SSDP, SQLite writes — runs on Tokio tasks owned by the Rust core, not in the UI thread.
-- The Android MediaSession can issue commands without a visible UI by calling Rust through JNI, reusing the same `_impl` functions as Tauri commands.
+- The Android MediaSession and the home-screen widget can issue commands without a visible UI by calling Rust through JNI, reusing the same `_impl` functions as Tauri commands.
 
 ## Frontend (`src/`)
 
@@ -95,7 +95,7 @@ Files:
 | --- | --- |
 | Discovery | `discover_roku_devices`, `check_device_connectivity`, `get_cached_devices`, `test_network_connectivity` |
 | Apps | `list_roku_apps`, `launch_roku_app`, `get_active_app`, `get_app_icon`, `get_cached_apps` |
-| Control | `send_roku_command`, `get_media_player` |
+| Control | `send_roku_command`, `toggle_roku_power`, `get_media_player` |
 | Lifecycle / data | `clear_all_data`, `restart_app` |
 | Updates | `check_for_update`; `install_update` (desktop: emits `update-progress`, then restarts); `open_update_download` (Android: the APK in the browser) |
 | Android-only (no-op on desktop) | `ensure_android_discovery_permissions`, `ensure_android_notification_permission`, `open_android_app_settings`, `update_media_notification`, `hide_media_notification` |
@@ -152,16 +152,34 @@ Kotlin sources live under [src-tauri/gen/android/app/src/main/java/com/rokucontr
 - `MainActivity.kt` — Tauri webview host; also exposes the permission, notification, haptic and multicast-lock methods that Rust calls back into. Every one of them catches its own exceptions and hops to the UI thread where needed, because Rust calls them from non-UI threads.
 - `MediaSessionManager.kt` — media controls on the lock screen and notification shade. A process-wide singleton holding a `MediaSessionCompat`; `show(...)` posts the notification and `hide()` removes it. State is confined to the main thread; only the native calls run on IO.
 - `MediaControlReceiver.kt` — broadcast receiver for the notification's buttons. Sends the key straight through the native bridge, so it works in a process that has no activity.
+- `RemoteWidgetProvider.kt`, `WidgetActionReceiver.kt`, `RemoteWidgetConfigActivity.kt`, `WidgetStore.kt`, `WidgetModel.kt` — the home-screen widget (see below).
 - `TaskWatcherService.kt` — bound-only service whose single job is `onTaskRemoved`: remove the notification when the app is swiped away.
 - `AppUpdate.kt` — the app's own update. It downloads a release's APK into `cache/updates`, resuming with `Range` requests when Android cuts a backgrounded app off. It checks the APK's package and versionName, then opens Android's installer through the FileProvider. The installer only opens while the activity is resumed, because Android silently drops a launch from the background. `UpdateRelease.kt` holds its pure parts (the APK's name and address, header parsing), which `UpdateReleaseTest` covers.
 
 **JavaScript bridge.** Unlike the rest of the Android layer, the update doesn't go through Rust. `MainActivity.onWebViewCreate` adds `window.RokuApp` with three methods: `downloadUpdate(version)`, `installsBlocked()` (Android 16+ Advanced Protection) and `openSecuritySettings()`. `AppUpdate` reports progress to `window.__rokuUpdate` with `evaluateJavascript`. ProGuard keeps `@JavascriptInterface` methods, because release builds are minified.
 
-**No foreground service.** The media notification is a plain `MediaStyle` notification. It used to be backed by a `START_STICKY` `mediaPlayback` foreground service that was never stopped; after the process died in the background the system restarted it with no activity and it called `startForeground`, which Android rejects. The notification is now shown only while the activity is visible and removed on device switch, forget, Delete All Data, task removal and exit. The trade-off: once Android freezes or kills the backgrounded app the lock-screen controls can go stale or disappear. Do not reintroduce a sticky or media-typed foreground service to "fix" that.
+**No foreground service.** The media notification is a plain `MediaStyle` notification. It used to be backed by a `START_STICKY` `mediaPlayback` foreground service that was never stopped; after the process died in the background the system restarted it with no activity and it called `startForeground`, which Android rejects. The notification is now shown only while the activity is visible and removed on device switch, forget, Delete All Data, task removal and exit. The trade-off: once Android freezes or kills the backgrounded app the lock-screen controls can go stale or disappear. Do not reintroduce a sticky or media-typed foreground service to "fix" that; the home-screen widget is the control that is always there.
+
+**Lock-screen buttons.** There are five: volume down, play/pause, volume up, mute, power. They are declared twice, and the two lists must stay in the same order. On Android 13+ the system media player ignores the notification's actions and builds its buttons from the session's `PlaybackState`: play/pause is the only transport action advertised, so the player gives the previous/next slots and the two extra slots to the four custom actions, in order (`CUSTOM_ACTIONS`). Advertising `ACTION_SKIP_TO_*` again would push volume out of those slots. Custom actions arrive in `onCustomAction` on the live session. The notification's own `addAction` list is what Android 12 and older show and what still works after the process is killed, because those buttons are broadcasts to `MediaControlReceiver`.
+
+**Power is a toggle.** `power_toggle` is not an ECP key: `toggle_power_impl` reads `power-mode` from `query/device-info` and sends `PowerOff` when it is `PowerOn`, `PowerOn` for any standby mode, and the plain `Power` key when the device doesn't say. If the device can't be reached it sends nothing. The app's power button, the lock screen and the widget all go through it.
+
+**Home-screen widget.** One resizable `AppWidgetProvider` built from `RemoteViews` (no Compose or Glance). `WidgetSizing` picks one of three layouts by size: a row of TV controls, the same row under the Roku's name, or the full remote. On Android 12+ all three are handed to the launcher as a size map; older versions pick one in `onAppWidgetOptionsChanged`.
+
+- *Which Roku.* `RemoteWidgetConfigActivity` lists the saved devices and stores the choice per widget in the `remote_widgets` SharedPreferences (`WidgetStore`). The device list comes from `nativeListSavedDevices`, which opens `roku_cache.db` read-only with its own connection, because the background task system only exists once `run()` has started. A widget's device is matched by `hardware_id` against that list on every press, on `onUpdate` and in `MainActivity.onStop`, so it follows a Roku to a new address or name, and returns to "Tap to choose a Roku" when the device was forgotten or all data was deleted. If the list can't be read the stored address is kept.
+- *Presses.* Each button is a broadcast to `WidgetActionReceiver` whose data URI (`rokuwidget://action/<widgetId>/<command>`) carries everything; there are no extras to go stale. The receiver is not exported, so only the widget's own PendingIntents can send keys; the provider has to be exported and therefore only draws. The key is sent through the same native bridge as the notification's buttons and works in a process with no activity.
+- *Feedback.* RemoteViews can't show a toast or vibrate, so a failed press or a power change briefly replaces the Roku's name (or covers the one-row layout) with a status line.
+- *Android 17.* Without `ACCESS_LOCAL_NETWORK` the widget shows "Open Roku Remote to allow local network access" instead of buttons that would only time out.
+- The widget starts no service and schedules no updates (`updatePeriodMillis="0"`); it runs only for the length of a broadcast.
+
+`WidgetModel.kt` holds the rules with no Android classes in them (sizing, buttons, the stored format, following a device, the URIs); `WidgetModelTest` covers them.
 
 **JNI bridge** (defined in [lib.rs](src-tauri/src/lib.rs)):
 
 - `Java_…_MediaSessionManager_nativeSendRokuCommand` → `send_roku_command_impl`
+- `Java_…_MediaSessionManager_nativeTogglePower` → `toggle_power_impl`
+- `Java_…_MediaSessionManager_nativeQueryIsPlaying` → `get_media_player_impl`
+- `Java_…_MediaSessionManager_nativeListSavedDevices` → `background::read_saved_devices`
 - `Java_…_MediaSessionManager_nativeGetAppIconDataUrl` → `get_app_icon_impl`
 - `Java_…_MainActivity_nativeOnActivityCreated` / `nativeOnActivityDestroyed` → keep the `CURRENT_ACTIVITY` reference that `with_activity` uses
 - `Java_…_MainActivity_nativeOnPermissionResult` → wakes the command that is awaiting the user's answer to a permission dialog
