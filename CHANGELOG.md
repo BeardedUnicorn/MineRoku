@@ -12,6 +12,9 @@ version (README's "Releasing").
 - The app updates itself from GitHub releases. On macOS and Windows it checks at launch and once a day, asks, then downloads, verifies, installs and restarts. On Android it downloads the new APK and opens Android's installer, which keeps your devices and settings. Settings → Updates shows the version, checks now, and turns automatic checks off.
 - Releases are built, signed and published by CI from a version tag: macOS (Apple silicon and Intel), Windows and an arm64 Android APK.
 
+### Fixed
+- Forgetting a device, Delete All Data and caching app lists failed with "foreign key mismatch" on installs that predate hardware-id device keys. The stale app cache is rebuilt on startup.
+
 ## 0.1.0 – 2026-11-23
 
 First tagged release.
