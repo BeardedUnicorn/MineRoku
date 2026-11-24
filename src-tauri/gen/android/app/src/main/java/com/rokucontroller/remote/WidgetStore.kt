@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.os.Build
 import androidx.core.content.ContextCompat
+import androidx.core.content.edit
 import android.content.pm.PackageManager
 import java.io.File
 import org.json.JSONArray
@@ -23,11 +24,11 @@ object WidgetStore {
         WidgetDevice.decode(prefs(context).getString(key(widgetId), null))
 
     fun put(context: Context, widgetId: Int, device: WidgetDevice) {
-        prefs(context).edit().putString(key(widgetId), device.encode()).apply()
+        prefs(context).edit { putString(key(widgetId), device.encode()) }
     }
 
     fun remove(context: Context, widgetId: Int) {
-        prefs(context).edit().remove(key(widgetId)).apply()
+        prefs(context).edit { remove(key(widgetId)) }
     }
 
     /** Moves widgets restored from a backup to their new IDs. */
@@ -36,10 +37,10 @@ object WidgetStore {
             .mapNotNull { id -> prefs(context).getString(key(id), null)?.let { id to it } }
             .toMap()
         val remapped = WidgetDevices.remapIds(entries, oldIds, newIds)
-        prefs(context).edit().apply {
+        prefs(context).edit {
             entries.keys.forEach { remove(key(it)) }
             remapped.forEach { (id, value) -> putString(key(id), value) }
-        }.apply()
+        }
     }
 
     /**

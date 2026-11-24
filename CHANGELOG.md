@@ -6,6 +6,11 @@ heading into the new version's. Each section becomes that release's notes on
 GitHub, and the in-app update dialog shows the sections since the installed
 version (README's "Releasing").
 
+## Unreleased
+
+### Fixed
+- Android: the launcher icon is sharp on medium-density (hdpi) screens, where it used to be drawn from an undersized image, and launchers that use round icons get the proper adaptive icon.
+
 ## 0.3.0 – 2026-11-23
 
 ### Added

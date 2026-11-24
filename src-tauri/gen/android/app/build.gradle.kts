@@ -1,4 +1,4 @@
-import java.io.FileInputStream
+import com.android.build.api.dsl.ApplicationExtension
 import java.util.Properties
 import org.gradle.api.JavaVersion
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
@@ -17,7 +17,8 @@ val tauriProperties = Properties().apply {
     }
 }
 
-android {
+// Named by type: the generated `android {}` accessor is deprecated while android.newDsl=false.
+configure<ApplicationExtension> {
     compileSdk = 37
     namespace = "com.rokucontroller.remote"
 
@@ -37,7 +38,7 @@ android {
             val keyPropertiesFile = rootProject.file("keystore.properties")
             if (keyPropertiesFile.exists()) {
                 val keyProps = Properties().apply {
-                    load(FileInputStream(keyPropertiesFile))
+                    keyPropertiesFile.inputStream().use { load(it) }
                 }
                 keyAlias = keyProps.getProperty("keyAlias")
                 keyPassword = keyProps.getProperty("password")
@@ -61,6 +62,7 @@ android {
         }
         getByName("release") {
             isMinifyEnabled = true
+            isShrinkResources = true
             signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 *fileTree(".") { include("**/*.pro") }
