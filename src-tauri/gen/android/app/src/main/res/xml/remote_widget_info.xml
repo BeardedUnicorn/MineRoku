@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- One resizable widget: a row of TV controls at 4x1, the full remote once it is tall enough
+     (RemoteWidgetProvider picks the layout). Each widget is set up with its own Roku. -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:minWidth="250dp"
+    android:minHeight="40dp"
+    android:minResizeWidth="180dp"
+    android:minResizeHeight="40dp"
+    android:targetCellWidth="4"
+    android:targetCellHeight="1"
+    android:resizeMode="horizontal|vertical"
+    android:widgetCategory="home_screen|keyguard"
+    android:initialLayout="@layout/widget_remote_unconfigured"
+    android:initialKeyguardLayout="@layout/widget_remote_unconfigured"
+    android:previewLayout="@layout/widget_remote_strip_titled"
+    android:configure="com.rokucontroller.remote.RemoteWidgetConfigActivity"
+    android:widgetFeatures="reconfigurable"
+    android:description="@string/widget_description"
+    android:updatePeriodMillis="0"
+    tools:targetApi="31" />

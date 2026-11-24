@@ -7,4 +7,43 @@
         <item name="android:statusBarColor">@color/app_background</item>
         <item name="android:navigationBarColor">@color/app_background</item>
     </style>
+
+    <!-- The widget's device picker: a small dark dialog over the home screen. -->
+    <style name="Theme.RokuWidgetConfig" parent="Theme.MaterialComponents.Dialog.MinWidth">
+        <item name="colorPrimary">@color/purple_200</item>
+        <item name="colorSecondary">@color/purple_200</item>
+        <item name="windowNoTitle">true</item>
+    </style>
+
+    <!-- A widget button. Rows share their width equally, so buttons stay well over 48dp wide. -->
+    <style name="WidgetButton">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_height">match_parent</item>
+        <item name="android:layout_weight">1</item>
+        <item name="android:layout_margin">3dp</item>
+        <item name="android:background">@drawable/widget_button_bg</item>
+        <item name="android:scaleType">center</item>
+        <item name="android:tint">@color/widget_on_surface</item>
+    </style>
+
+    <style name="WidgetRow">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">0dp</item>
+        <item name="android:layout_weight">1</item>
+        <item name="android:orientation">horizontal</item>
+        <item name="android:baselineAligned">false</item>
+    </style>
+
+    <style name="WidgetTitle">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:gravity">center_vertical</item>
+        <item name="android:paddingStart">6dp</item>
+        <item name="android:paddingEnd">6dp</item>
+        <item name="android:singleLine">true</item>
+        <item name="android:ellipsize">end</item>
+        <item name="android:textColor">@color/widget_on_surface_muted</item>
+        <item name="android:textSize">13sp</item>
+        <item name="android:text">@string/app_name</item>
+    </style>
 </resources>
+
