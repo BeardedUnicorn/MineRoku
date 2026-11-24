@@ -98,7 +98,7 @@ Files:
 ## Native crates (`crates/`)
 
 - [crates/roku/](crates/roku/) — vendored fork of Carlo Abelli's `roku` crate. Provides the typed ECP `Device` (apps, active_app, media_player, keypress/down/up, launch, device_info, input, search) and serde-xml-rs models. All HTTP to Roku boxes funnels through this crate; backend code that builds raw URLs itself is the exception, not the rule.
-- [crates/ssdp-client/](crates/ssdp-client/) — vendored fork of [`jakobhellermann/ssdp-client`](https://github.com/jakobhellermann/ssdp-client) v2.1.0 (upstream commit `f143d09`). App discovery runs through it: `discover_roku_devices_impl` in [src-tauri/src/commands.rs](src-tauri/src/commands.rs) calls `run_discovery_once` in [src-tauri/src/background_discovery.rs](src-tauri/src/background_discovery.rs), which calls `ssdp_client::search`. The local changes in [src/search.rs](crates/ssdp-client/src/search.rs) make discovery work on Android (bind to `wlan0` to bypass VPNs, join multicast on the WiFi interface) and send M-SEARCH several times on every platform. Both `src-tauri` and `roku` use this copy through `[patch.crates-io]` in [src-tauri/Cargo.toml](src-tauri/Cargo.toml). `git show ef85274 -- crates/ssdp-client` shows the exact difference from upstream.
+- [crates/ssdp-client/](crates/ssdp-client/) — vendored fork of [`jakobhellermann/ssdp-client`](https://github.com/jakobhellermann/ssdp-client) v2.1.0 (upstream commit `f143d09`). App discovery runs through it: `discover_roku_devices_impl` in [src-tauri/src/commands.rs](src-tauri/src/commands.rs) calls `run_discovery_once` in [src-tauri/src/background_discovery.rs](src-tauri/src/background_discovery.rs), which calls `ssdp_client::search`. The local changes in [src/search.rs](crates/ssdp-client/src/search.rs) make discovery work on Android (bind to `wlan0` to bypass VPNs, join multicast on the WiFi interface) and send M-SEARCH several times on every platform. `search` returns the send error only when every attempt fails, so a search that never left the machine is reported instead of waiting out the timeout. Both `src-tauri` and `roku` use this copy through `[patch.crates-io]` in [src-tauri/Cargo.toml](src-tauri/Cargo.toml). `git show ef85274 -- crates/ssdp-client` shows the exact difference from upstream.
 
 ## Persistence: SQLite
 
@@ -120,8 +120,21 @@ icons  (device_ip TEXT, app_id TEXT, icon_data TEXT, cached_at,
 1. SSDP M-SEARCH with the custom search target `roku:ecp`. Timing differs by platform — desktop uses ~5s total / MX=2, Android uses ~10s total / MX=4 because multicast locks cost more.
 2. For each LOCATION header, fetch `/query/device-info` and derive the `hardware_id`.
 3. Dedupe responses within a 60s last-seen window. New device → emit `device_discovered`. No response for 60s → emit `device_lost`.
-4. If SSDP returns nothing or cannot start (common on networks that block multicast), fall back to `scan_network_for_roku` which sweeps the local /24 with HTTP probes. Devices found this way are announced and persisted exactly like SSDP results.
+4. If SSDP returns nothing or cannot start (common on networks that block multicast), fall back to `scan_network_for_roku` which sweeps the local /24 with HTTP probes. Devices found this way are announced and persisted exactly like SSDP results. If SSDP could not send at all and the sweep finds nothing, the cycle returns an error saying the local network is unreachable (on macOS, pointing at the Local Network setting) instead of an empty list.
 5. Persist seen devices to SQLite so cold launches show the last-known list immediately while a fresh scan runs.
+
+Only one cycle runs at a time. `run_discovery_once` holds an async mutex for the whole cycle, and a caller that had to wait for a running cycle gets that cycle's result instead of starting another. At desktop launch the `setup` hook and the frontend's first scan both ask for discovery. Two overlapping M-SEARCHes compete for the same replies, and the frontend marks every device missing from its result as offline.
+
+## macOS platform layer
+
+**Local Network privacy.** Since macOS 15, an app launched from Finder or the Dock needs the user's permission for any LAN traffic: SSDP, the subnet sweep and every ECP request. Without it, sends fail with `EHOSTUNREACH` ("No route to host") and TCP connects are dropped with `reason: NECP` in the kernel log. Processes started from Terminal are exempt, which is why `pnpm tauri dev` works when the built app does not.
+
+macOS remembers the decision per **code-signing identifier**, so the bundle must be signed with an identifier that equals the bundle ID and stays the same across builds:
+
+- `bundle.macOS.signingIdentity` is `"-"` in [tauri.conf.json](src-tauri/tauri.conf.json): the bundler ad-hoc signs the whole `.app`, which gives it the identifier `com.rokucontroller.remote` and binds the Info.plist. Without it the binary keeps only the linker's ad-hoc signature, whose identifier is `roku_controller-<hash>` and changes with every build. The permission then never matches the running app and discovery silently finds nothing. Setting `APPLE_SIGNING_IDENTITY` to a real certificate overrides this.
+- [src-tauri/Info.plist](src-tauri/Info.plist) is merged into the bundle's Info.plist and supplies `NSLocalNetworkUsageDescription`, the text of the permission prompt.
+
+To check a build: `codesign -dv "Roku Remote.app"` should print `Identifier=com.rokucontroller.remote`. The setting lives in System Settings > Privacy & Security > Local Network.
 
 ## Android platform layer
 
@@ -153,7 +166,7 @@ This is *why* the `_impl`/wrapper split exists — both Tauri commands and Kotli
 
 **Logging.** `android::init_logging()` runs at the top of `run()` and routes Rust `log` output and panics (with backtrace) to logcat under the tag `RokuRust`. The binary's `main()` is never executed on Android, so logging must not be set up there. `MainActivity` also logs the previous process exit reasons on start, which is how to tell a crash from a low-memory kill.
 
-**Background discovery is gated off at startup on Android** — it only runs when the user triggers a scan. Desktop runs one discovery cycle from the `setup` hook; there is no periodic loop on any platform.
+**Background discovery is gated off at startup on Android** — it only runs when the user triggers a scan. Desktop runs one discovery cycle from the `setup` hook, which the frontend's first scan joins; there is no periodic loop on any platform.
 
 **Forgetting a device.** `forget_device` deletes the device's SQLite row plus the app and icon caches stored under its IP, and the frontend removes it from the persisted store. Both are needed because each side re-seeds the other on launch. There is no blocklist: a later scan that finds the device lists it again.
 
@@ -164,7 +177,7 @@ Frontend / app:
 - `pnpm tauri dev` — full app, hot reload on both frontend and Rust.
 - `pnpm dev` — Vite only, useful when working on UI with the backend mocked.
 - `pnpm build` — `tsc` + Vite production build.
-- `pnpm tauri build` — desktop bundle.
+- `pnpm tauri build` — desktop bundle (ad-hoc signed on macOS; see [macOS platform layer](#macos-platform-layer)).
 - `pnpm test` — Vitest with v8 coverage.
 
 Vite ([vite.config.ts](vite.config.ts)) splits `react` and `mui` into chunks with Rolldown `codeSplitting` groups (warning threshold 900KB) and serves over `TAURI_DEV_HOST` for device-over-LAN HMR.

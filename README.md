@@ -195,6 +195,7 @@ mine-roku/
 ### Device Discovery Issues
 - Ensure your computer and Roku devices are on the same network
 - Check firewall settings - SSDP uses UDP port 1900
+- On macOS 15 or later, allow Roku Remote in System Settings > Privacy & Security > Local Network. Builds made with `pnpm tauri dev` from a terminal don't need this, but the bundled app does. `codesign -dv "Roku Remote.app"` must print `Identifier=com.rokucontroller.remote`, or macOS can't match the permission to the app (see [ARCHITECTURE.md](ARCHITECTURE.md#macos-platform-layer))
 - Try refreshing the device list manually
 
 ### Connection Issues

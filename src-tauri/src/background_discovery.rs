@@ -2,7 +2,14 @@ use futures_util::stream::StreamExt;
 use once_cell::sync::Lazy;
 use serde::Serialize;
 use ssdp_client::{search, SearchTarget};
-use std::{collections::{HashMap, HashSet}, sync::Mutex, time::{Duration, Instant}};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Mutex,
+    },
+    time::{Duration, Instant},
+};
 use tauri::{AppHandle, Emitter};
 use url::Url;
 use chrono::Utc;
@@ -23,6 +30,13 @@ const SSDP_FOLLOWUP_WAIT: Duration = Duration::from_millis(900);
 const SSDP_MX: usize = 4;
 #[cfg(not(target_os = "android"))]
 const SSDP_MX: usize = 2;
+
+#[cfg(target_os = "macos")]
+const LAN_UNREACHABLE_MESSAGE: &str = "Can't reach your local network. Make sure Roku Remote is \
+     turned on in System Settings > Privacy & Security > Local Network, then scan again.";
+#[cfg(not(target_os = "macos"))]
+const LAN_UNREACHABLE_MESSAGE: &str = "Can't reach your local network. Make sure this device is \
+     on the same network as your Roku, then scan again.";
 
 #[derive(Debug, Clone, Serialize)]
 pub struct RokuDeviceEvent {
@@ -70,8 +84,38 @@ async fn record_discovered(app: &AppHandle, evt: &RokuDeviceEvent) {
     }
 }
 
+type DiscoveryResult = Result<Vec<RokuDeviceEvent>, String>;
+
+/// The most recent cycle's result, guarded so only one cycle runs at a time.
+static DISCOVERY_RUN: Lazy<tokio::sync::Mutex<Option<DiscoveryResult>>> =
+    Lazy::new(|| tokio::sync::Mutex::new(None));
+
+/// Bumped (while holding `DISCOVERY_RUN`) each time a cycle finishes.
+static DISCOVERY_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+/// Runs a discovery cycle, or waits for the one already running and returns its result.
+///
+/// On desktop the `setup` hook and the frontend's first scan both start discovery at launch.
+/// Two overlapping M-SEARCHes compete for the same replies, and a Roku may answer only one of
+/// them in time, so the frontend got a partial list and marked the missing devices offline.
+pub async fn run_discovery_once(app: &AppHandle) -> DiscoveryResult {
+    let generation_before_wait = DISCOVERY_GENERATION.load(Ordering::SeqCst);
+    let mut last_result = DISCOVERY_RUN.lock().await;
+    if DISCOVERY_GENERATION.load(Ordering::SeqCst) != generation_before_wait {
+        if let Some(result) = last_result.as_ref() {
+            log::info!("Discovery cycle finished while waiting; sharing its result");
+            return result.clone();
+        }
+    }
+
+    let result = run_discovery_cycle(app).await;
+    *last_result = Some(result.clone());
+    DISCOVERY_GENERATION.fetch_add(1, Ordering::SeqCst);
+    result
+}
+
 /// Run a single discovery cycle, collecting ALL devices found
-pub async fn run_discovery_once(app: &AppHandle) -> Result<Vec<RokuDeviceEvent>, String> {
+async fn run_discovery_cycle(app: &AppHandle) -> DiscoveryResult {
     let search_target = SearchTarget::Custom("roku".into(), "ecp".into());
     let _ = app.emit("discovery_cycle_start", ());
 
@@ -86,6 +130,7 @@ pub async fn run_discovery_once(app: &AppHandle) -> Result<Vec<RokuDeviceEvent>,
     log::info!("Using search timeout: {:?}", search_timeout);
 
     // A failed SSDP start (no multicast route, socket error) still gets the subnet sweep below.
+    let mut ssdp_error = None;
     let mut responses = match search(&search_target, search_timeout, SSDP_MX, Some(4)).await {
         Ok(s) => {
             log::info!("SSDP search initiated successfully");
@@ -93,6 +138,7 @@ pub async fn run_discovery_once(app: &AppHandle) -> Result<Vec<RokuDeviceEvent>,
         }
         Err(e) => {
             log::error!("SSDP search initialization error: {}", e);
+            ssdp_error = Some(e);
             None
         }
     };
@@ -252,6 +298,16 @@ pub async fn run_discovery_once(app: &AppHandle) -> Result<Vec<RokuDeviceEvent>,
     }
 
     let _ = app.emit("discovery_cycle_end", &discovered_devices);
+
+    // The search never left this machine and the sweep reached nothing either: say so, rather
+    // than "no devices found", which sends the user to check their Roku instead.
+    if discovered_devices.is_empty() {
+        if let Some(e) = ssdp_error {
+            log::error!("Local network unreachable: {}", e);
+            return Err(LAN_UNREACHABLE_MESSAGE.to_string());
+        }
+    }
+
     Ok(discovered_devices)
 }
 

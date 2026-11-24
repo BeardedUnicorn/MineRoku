@@ -270,18 +270,31 @@ pub async fn search(
     // Send multiple times for reliability, especially on Android
     let send_count = if cfg!(target_os = "android") { 5 } else { 3 };
     log::info!("SSDP: Will send {} M-SEARCH packets", send_count);
-    
+
+    let mut sent_any = false;
+    let mut last_send_error = None;
     for i in 0..send_count {
         match socket.send_to(msg.as_bytes(), &broadcast_address).await {
             Ok(bytes) => {
+                sent_any = true;
                 log::info!("SSDP: Successfully sent {} bytes to {} (attempt {})", bytes, broadcast_address, i + 1);
             }
             Err(e) => {
                 log::error!("SSDP: Failed to send M-SEARCH (attempt {}): {} (kind: {:?})", i + 1, e, e.kind());
+                last_send_error = Some(e);
             }
         }
         if i < send_count - 1 {
             tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    }
+
+    // No M-SEARCH left this machine, so no reply can come. Report why instead of waiting out
+    // the timeout (upstream returned the first send error). On macOS an app without Local
+    // Network access gets EHOSTUNREACH here.
+    if !sent_any {
+        if let Some(e) = last_send_error {
+            return Err(Error::IO(e));
         }
     }
 
