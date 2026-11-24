@@ -17,7 +17,7 @@ enum class WidgetLayout {
 object WidgetSizing {
     const val TITLED_MIN_HEIGHT_DP = 76
 
-    // Title, five rows of buttons and padding: each row is then at least 46dp tall.
+    // Title, five rows of buttons and padding: each row is then at least 48dp tall.
     const val FULL_MIN_HEIGHT_DP = 280
     const val FULL_MIN_WIDTH_DP = 200
 

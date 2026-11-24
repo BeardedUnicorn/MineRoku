@@ -31,7 +31,10 @@
         android:id="@+id/config_devices"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:clipToPadding="false"
         android:divider="@null"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp"
         android:visibility="gone" />
 
     <Button
