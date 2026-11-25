@@ -24,7 +24,7 @@ Key workflows:
 
 ## Screenshots
 
-Composite screenshot showing remote controls, apps grid, and device sidebar:
+Composite screenshot showing remote controls, apps grid, and device list:
 
 <p align="center">
   <img src="docs/screenshots/remote.png" alt="Remote, Apps, and Device Sidebar" width="100%" />
@@ -56,9 +56,11 @@ Short GIF showing navigation and launching an app:
 - **Android Widget and Lock Screen**: A home-screen remote widget, and volume, play/pause and power on the lock screen
 
 ### Enhanced UI/UX
-- **Material-UI Design**: Modern, responsive interface with dark theme
-- **Tabbed Interface**: Clean separation between remote control and app management
-- **App Grid Layout**: Visual app browser with icons and metadata
+- **Dark, Modern Design**: Deep purple theme with a bundled typeface, on desktop and phone layouts
+- **Remote Styles**: Classic, Studio, Glass and High Contrast, picked from previews in Settings
+- **Device Switcher**: Always-visible device list on desktop; on phones, a sheet opened from the device name
+- **App Grid**: One scrolling grid with search; tap an app's artwork to launch it
+- **Favorites**: Star apps to launch them with one tap, from the remote screen or the apps grid
 - **Real-time Feedback**: Success/error notifications for all actions
 - **Auto-refresh**: Automatic device discovery and app list updates
 
@@ -153,12 +155,14 @@ Core Tauri commands (Rust):
 mine-roku/
 ├── src/                          # React frontend
 │   ├── components/
-│   │   ├── AppLauncher.tsx      # App management component
-│   │   ├── DeviceTabs.tsx       # Device selection component
+│   │   ├── AppLauncher.tsx      # Apps grid with search and favorites
+│   │   ├── DevicePanel.tsx      # Device list, scan and forget
+│   │   ├── SettingsDialog.tsx   # Settings, updates and data deletion
 │   │   └── RemoteControl.tsx    # Remote control component
 │   ├── App.tsx                  # Main app component
 │   ├── main.tsx                 # React entry point
-│   └── theme.ts                 # Material-UI theme
+│   ├── tokens.ts                # Design tokens (color, radius, motion)
+│   └── theme.ts                 # Material-UI theme built from the tokens
 ├── src-tauri/                   # Rust backend
 │   ├── src/
 │   │   ├── commands.rs          # Tauri command implementations

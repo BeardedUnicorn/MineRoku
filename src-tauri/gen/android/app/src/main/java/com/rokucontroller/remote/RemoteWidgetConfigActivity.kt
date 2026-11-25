@@ -90,7 +90,7 @@ class RemoteWidgetConfigActivity : AppCompatActivity() {
 
     /** A Roku's name over its address. */
     private class DeviceAdapter(context: Context, devices: List<WidgetDevice>) :
-        ArrayAdapter<WidgetDevice>(context, android.R.layout.simple_list_item_activated_2, android.R.id.text1, devices) {
+        ArrayAdapter<WidgetDevice>(context, R.layout.widget_config_device_row, android.R.id.text1, devices) {
         override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
             val view = super.getView(position, convertView, parent)
             val device = getItem(position) ?: return view

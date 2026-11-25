@@ -23,6 +23,8 @@
         "resizable": true,
         "width": 1000,
         "height": 750,
+        "minWidth": 360,
+        "minHeight": 600,
         "decorations": true,
         "center": true,
         "backgroundColor": "#150F26",
