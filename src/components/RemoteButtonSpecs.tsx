@@ -7,7 +7,7 @@ import FastRewindIcon from '@mui/icons-material/FastRewind';
 import FastForwardIcon from '@mui/icons-material/FastForward';
 import VolumeUpIcon from '@mui/icons-material/VolumeUp';
 import VolumeDownIcon from '@mui/icons-material/VolumeDown';
-import VolumeMuteIcon from '@mui/icons-material/VolumeMute';
+import VolumeOffIcon from '@mui/icons-material/VolumeOff';
 import PowerSettingsNewIcon from '@mui/icons-material/PowerSettingsNew';
 import { POWER_TOGGLE_COMMAND } from '../services/rokuClient';
 
@@ -26,7 +26,7 @@ export const systemButtonSpecs: CommandSpec[] = [
 
 export const volumeButtonSpecs: CommandSpec[] = [
   { key: 'VolumeDown', icon: <VolumeDownIcon />, label: 'Volume Down', shortcut: '-' },
-  { key: 'VolumeMute', icon: <VolumeMuteIcon />, label: 'Mute', shortcut: 'M' },
+  { key: 'VolumeMute', icon: <VolumeOffIcon />, label: 'Mute', shortcut: 'M' },
   { key: 'VolumeUp', icon: <VolumeUpIcon />, label: 'Volume Up', shortcut: '+' },
 ];
 

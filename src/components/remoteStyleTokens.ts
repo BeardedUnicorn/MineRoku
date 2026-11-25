@@ -1,5 +1,6 @@
 import { alpha, type Theme } from '@mui/material/styles';
 import { coerceRemoteStylePreset, type RemoteStylePreset } from '../store';
+import { tokens } from '../tokens';
 
 export interface DpadMetrics {
   arrowSize: number;
@@ -53,9 +54,19 @@ export interface RemoteStyleTokens {
   centerButtonHoverBackground: string;
   centerButtonColor: string;
   centerButtonShadow: string;
+  powerButtonBackground: string;
+  powerButtonHoverBackground: string;
+  powerButtonColor: string;
   dividerOpacity: number;
   helperTextOpacity: number;
 }
+
+// The same red on every style, and independent of the app's error color.
+const powerButton = {
+  powerButtonBackground: '#d32f2f',
+  powerButtonHoverBackground: '#f44336',
+  powerButtonColor: '#ffffff',
+} as const;
 
 export const getRemoteStyleTokens = (
   style: RemoteStylePreset,
@@ -74,7 +85,7 @@ export const getRemoteStyleTokens = (
         cardBorder: `1px solid ${alpha(theme.palette.common.white, 0.08)}`,
         cardShadow: '0 10px 24px rgba(0,0,0,0.52), inset 0 1px 0 rgba(255,255,255,0.04)',
         cardBackdropFilter: 'none',
-        titleColor: theme.palette.text.primary,
+        titleColor: '#ffffff',
         appPillBackground: alpha(theme.palette.common.white, 0.08),
         appPillHoverBackground: alpha(theme.palette.common.white, 0.14),
         dpadBackground: `radial-gradient(circle at 40% 28%, ${alpha(
@@ -87,12 +98,13 @@ export const getRemoteStyleTokens = (
         dpadShadow: '0 6px 14px rgba(0,0,0,0.52), inset 0 1px 2px rgba(255,255,255,0.05)',
         flatButtonBackground: alpha(theme.palette.grey[700], 0.58),
         flatButtonHoverBackground: alpha(theme.palette.grey[600], 0.72),
-        flatButtonColor: theme.palette.text.primary,
+        flatButtonColor: '#ffffff',
         ringBorderColor: alpha(theme.palette.common.white, 0.28),
         centerButtonBackground: 'linear-gradient(145deg, #7d5cd8, #5e41b6)',
         centerButtonHoverBackground: 'linear-gradient(145deg, #8664e0, #6749c0)',
         centerButtonColor: '#ffffff',
         centerButtonShadow: '0 6px 12px rgba(0,0,0,0.46), inset 0 1px 1px rgba(255,255,255,0.12)',
+        ...powerButton,
         dividerOpacity: 0.36,
         helperTextOpacity: 0.64,
       };
@@ -116,6 +128,7 @@ export const getRemoteStyleTokens = (
         centerButtonHoverBackground: 'linear-gradient(150deg, #a691ff, #7a60e4)',
         centerButtonColor: '#ffffff',
         centerButtonShadow: '0 7px 14px rgba(0,0,0,0.5), inset 0 1px 1px rgba(255,255,255,0.2)',
+        ...powerButton,
         dividerOpacity: 0.44,
         helperTextOpacity: 0.78,
       };
@@ -139,30 +152,34 @@ export const getRemoteStyleTokens = (
         centerButtonHoverBackground: 'linear-gradient(145deg, #f3f3f3, #c6c6c6)',
         centerButtonColor: '#000000',
         centerButtonShadow: '0 6px 12px rgba(0,0,0,0.75), inset 0 1px 0 rgba(255,255,255,0.95)',
+        ...powerButton,
         dividerOpacity: 0.68,
         helperTextOpacity: 0.86,
       };
     case 'classic':
     default:
+      // Fixed values, not theme lookups: the remote keeps its look when the app theme changes.
       return {
-        cardBackground: `linear-gradient(145deg, ${theme.palette.background.paper}, ${theme.palette.background.default})`,
-        activeAppOverlay: 'linear-gradient(145deg, rgba(12,12,12,0.7), rgba(12,12,12,0.92))',
-        cardBorder: `1px solid ${alpha(theme.palette.common.white, 0.06)}`,
+        cardBackground: `linear-gradient(145deg, ${tokens.surface2}, ${tokens.bg})`,
+        activeAppOverlay: 'linear-gradient(145deg, rgba(21,15,38,0.72), rgba(21,15,38,0.92))',
+        cardBorder: '1px solid rgba(255,255,255,0.06)',
         cardShadow: 'inset 0 1px 2px rgba(255,255,255,0.06), 0 6px 18px rgba(0,0,0,0.6)',
         cardBackdropFilter: 'none',
-        titleColor: theme.palette.text.primary,
-        appPillBackground: theme.palette.action.hover,
-        appPillHoverBackground: theme.palette.action.selected,
-        dpadBackground: `radial-gradient(circle at 30% 30%, ${theme.palette.grey[900]} 0%, ${theme.palette.grey[800]} 60%, ${theme.palette.grey[900]} 100%)`,
+        titleColor: '#ffffff',
+        appPillBackground: 'rgba(255,255,255,0.08)',
+        appPillHoverBackground: 'rgba(255,255,255,0.16)',
+        dpadBackground: `radial-gradient(circle at 30% 30%, #1a1430 0%, ${tokens.surface3} 60%, #1a1430 100%)`,
         dpadShadow: '0 4px 10px rgba(0,0,0,0.6), inset 0 2px 4px rgba(255,255,255,0.05)',
-        flatButtonBackground: theme.palette.background.paper,
-        flatButtonHoverBackground: theme.palette.action.hover,
-        flatButtonColor: theme.palette.text.primary,
-        ringBorderColor: theme.palette.divider,
-        centerButtonBackground: `linear-gradient(145deg, ${theme.palette.primary.light}, ${theme.palette.primary.main})`,
-        centerButtonHoverBackground: `linear-gradient(145deg, ${theme.palette.primary.main}, ${theme.palette.primary.dark})`,
-        centerButtonColor: theme.palette.primary.contrastText,
+        flatButtonBackground: tokens.surface3,
+        flatButtonHoverBackground: tokens.surface4,
+        flatButtonColor: '#ffffff',
+        ringBorderColor: 'rgba(255,255,255,0.14)',
+        // The splash in index.html uses this pair (src/splash.test.ts).
+        centerButtonBackground: `linear-gradient(145deg, ${tokens.brandPurpleLight}, ${tokens.brandPurple})`,
+        centerButtonHoverBackground: `linear-gradient(145deg, ${tokens.brandPurple}, ${tokens.brandPurpleDark})`,
+        centerButtonColor: '#ffffff',
         centerButtonShadow: '0 6px 12px rgba(0,0,0,0.5), inset 0 1px 1px rgba(255,255,255,0.1)',
+        ...powerButton,
         dividerOpacity: 0.3,
         helperTextOpacity: 0.6,
       };

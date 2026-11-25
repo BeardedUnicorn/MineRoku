@@ -38,7 +38,7 @@ This document is the map. The [README](README.md) covers what the app *does*; th
 
 ## Frontend (`src/`)
 
-Entry path: [src/main.tsx](src/main.tsx) mounts [src/App.tsx](src/App.tsx), which owns the responsive layout (sidebar + main pane + mobile bottom nav), the discovery lifecycle (event listeners + initial scan), and the 10-second connectivity poll.
+Entry path: [src/main.tsx](src/main.tsx) mounts [src/App.tsx](src/App.tsx), which owns the responsive layout (device rail + main pane on desktop; app bar device switcher + bottom nav below 900px), the discovery lifecycle (event listeners + initial scan), and the 10-second connectivity poll.
 
 **Startup.** Native window colors (`backgroundColor` in `tauri.conf.json`, `windowBackground` in the Android theme) are dark so launch doesn't flash white. [index.html](index.html) then inlines the first-paint CSS and the `#app-splash` loading screen, because `src/*.css` only arrives with the JS bundle. A small inline script reads the saved `remoteStyle` to choose the splash accent; those colors mirror `remoteStyleTokens.ts`, and a test fails if they drift. `App` calls `dismissSplash` ([src/splash.ts](src/splash.ts)) on mount to fade it out over the real UI.
 
@@ -49,8 +49,14 @@ Entry path: [src/main.tsx](src/main.tsx) mounts [src/App.tsx](src/App.tsx), whic
 | File | Role |
 | --- | --- |
 | `RemoteControl.tsx` | Dpad, system/volume/playback buttons, keyboard shortcuts, active-app polling, Android media-notification updates |
-| `AppLauncher.tsx` (lazy) | Installed-app grid with search, favorites, responsive pagination, icon caching |
-| `Sidebar.tsx` | Device list with online/offline, settings dialog, data deletion |
+| `AppLauncher.tsx` (lazy) | Installed-app grid that scrolls with its pane, with a sticky search field and the favorites on top |
+| `AppTile.tsx`, `AppIcon.tsx` | One app in the grid; its 4:3 artwork, requested only when near the viewport |
+| `FavoritesRow.tsx` | Starred apps as one-tap launchers: under the remote on phones, on top of the apps grid |
+| `DevicePanel.tsx` | Device list with online/offline, scan and forget. The desktop rail, and the content of the phone sheet |
+| `DeviceSwitcher.tsx` | Phones: the app bar title button and the bottom sheet it opens |
+| `SettingsDialog.tsx` | Settings (remote style, device list options, updates, data deletion); full screen on phones |
+| `ToastProvider.tsx` | The app's single toast (`useToast()`); an action belongs to one message |
+| `EmptyState.tsx`, `StatusDot.tsx` | The centered card for "nothing to control yet" states; the online/offline dot |
 | `UpdatePrompt.tsx` | The update dialog; also runs the automatic checks (10 s after launch, then daily) |
 | `UpdatesSection.tsx` | Settings → Updates: version, Check for updates, automatic checks on/off |
 | `UpdateNotes.tsx` | Release notes since the running version, from the feed's CHANGELOG sections |
@@ -59,15 +65,22 @@ Entry path: [src/main.tsx](src/main.tsx) mounts [src/App.tsx](src/App.tsx), whic
 | `RemoteButtonSpecs.tsx` | Declarative button-group metadata (system/volume/playback/power) |
 | `remoteStyleTokens.ts` | Design tokens for the four remote presets (Classic, Studio, Glass, High Contrast) |
 
-**Hooks** ([src/hooks/usePlatform.ts](src/hooks/usePlatform.ts)) — caches Tauri's `platform()` promise so any consumer can synchronously branch on Android vs desktop after first await.
+**Hooks** ([src/hooks/](src/hooks/)) — `usePlatform` caches Tauri's `platform()` promise so any consumer can synchronously branch on Android vs desktop after first await. `useBackHandler` routes the Android back gesture to the topmost open sheet or dialog. `useDeviceApps`, `useLaunchApp` and `useAppIcon` are the app list, launching and artwork for whichever view needs them.
+
+**App list.** [src/services/appsStore.ts](src/services/appsStore.ts) is a small non-persisted Zustand store holding each device's app list, so the apps grid and the favorites row agree and the device is asked once. It shows the backend's cached list first, then the live one, retrying once when a waking Roku answers with nothing.
 
 **Services** ([src/services/rokuClient.ts](src/services/rokuClient.ts)) — every `invoke()` call lives here. It also implements request deduplication (one in-flight `discover_roku_devices`, one per device for `list_roku_apps`) and a concurrency-6 queue for icon fetches. Treat this file as the *only* place commands are named on the frontend; renaming a command should touch exactly one TS file.
 
 **Updates.** [src/services/updates.ts](src/services/updates.ts) is a separate Zustand store (`useUpdates`) for the update dialog's state machine: `idle`, `checking`, `upToDate`, `checkFailed`, `available`, `installing` and `installFailed`. Desktop installs go through `install_update` and `update-progress` events. A phone downloads through `window.RokuApp` ([src/services/androidUpdate.ts](src/services/androidUpdate.ts), see [Android platform layer](#android-platform-layer)), with `open_update_download` (the browser) as its fallback. Whether checks are automatic, and when the last one ran, are kept in `localStorage` under `rokuUpdate*` keys, which Delete All Data clears.
 
-**Caches.** [src/iconCache.ts](src/iconCache.ts) is an in-memory LRU (~1h TTL, ~100 items) layered over the backend's SQLite icon cache — first the React component checks memory, then asks the backend, which either returns its row or fetches from the Roku.
+**Caches.** [src/iconCache.ts](src/iconCache.ts) is an in-memory LRU (~1h TTL, ~300 items) layered over the backend's SQLite icon cache — first the React component checks memory, then asks the backend, which either returns its row or fetches from the Roku.
 
-**Styling.** MUI v9 dark theme in [src/theme.ts](src/theme.ts) with Emotion. The four remote style presets come from design tokens, not separate component trees.
+**Styling.** [src/tokens.ts](src/tokens.ts) holds the design tokens (surface tiers on the app icon's `#150F26`, the accent, radii, motion). [src/theme.ts](src/theme.ts) builds the MUI v9 dark theme from them, with `CssBaseline`, tonal surfaces in place of elevation shadows, and one focus ring for every control; the typeface is Inter, bundled through `@fontsource-variable/inter`. Components style with `sx`. Two rules:
+
+- `theme.shape.borderRadius` stays at 4. Numeric `borderRadius` values in `sx` are multiples of it and the remote uses several, so raising it would reshape the remote. Use the `radius` tokens (px strings) instead.
+- The remote does not follow the app theme. The four presets in `remoteStyleTokens.ts` are fixed values, including the OK and power buttons, so a theme change cannot restyle it.
+
+The background color is also written by hand where no bundle has loaded: `index.html` (first paint and splash), `tauri.conf.json` (window) and Android's `colors.xml` (window and system bars). [src/tokens.test.ts](src/tokens.test.ts) fails if one drifts; [src/splash.test.ts](src/splash.test.ts) ties the splash accents to each preset's OK button.
 
 **Tests.** Vitest + Testing Library (jsdom). Specs sit beside the file under test (`Foo.test.tsx`). [src/setupTests.ts](src/setupTests.ts) installs the Tauri invoke/event mocks every test inherits; [src/testUtils.tsx](src/testUtils.tsx) provides shared render helpers. Don't ad-hoc-mock Tauri inside individual tests — extend the setup file instead.
 
@@ -98,7 +111,7 @@ Files:
 | Control | `send_roku_command`, `toggle_roku_power`, `get_media_player` |
 | Lifecycle / data | `clear_all_data`, `restart_app` |
 | Updates | `check_for_update`; `install_update` (desktop: emits `update-progress`, then restarts); `open_update_download` (Android: the APK in the browser) |
-| Android-only (no-op on desktop) | `ensure_android_discovery_permissions`, `ensure_android_notification_permission`, `open_android_app_settings`, `update_media_notification`, `hide_media_notification` |
+| Android-only (no-op on desktop) | `ensure_android_discovery_permissions`, `ensure_android_local_network_access`, `check_android_local_network_access` (never prompts), `ensure_android_notification_permission`, `open_android_app_settings`, `update_media_notification`, `hide_media_notification` |
 
 **Events to the frontend**: from the discovery loop, `discovery_cycle_start`, `device_discovered`, `device_lost` and `discovery_cycle_end`; from a desktop update's download, `update-progress` (`{downloaded, total, installing}`). The frontend subscribes with `@tauri-apps/api/event`'s `listen()` in `App.tsx`.
 
@@ -190,7 +203,7 @@ This is *why* the `_impl`/wrapper split exists — both Tauri commands and Kotli
 
 **Edge-to-edge.** Android draws behind the system bars for targetSdk 35+, so `MainActivity.keepContentClearOfSystemBars` pads the WebView's container for the status bar, navigation bar, display cutout, and keyboard. Because it consumes those insets, CSS `env(safe-area-inset-*)` resolves to 0 in the WebView.
 
-**Permissions.** The app targets Android 17 (API 37), where *all* LAN traffic — SSDP, the subnet sweep and every ECP request, native sockets included — needs the runtime permission `ACCESS_LOCAL_NETWORK`. Without it requests time out rather than fail fast, so the frontend asks for it (`ensure_android_local_network_access`) as soon as a saved device exists and mounts nothing that polls a device until it is granted. On Android 13–16 discovery asks for nearby-devices / location instead. Notifications need `POST_NOTIFICATIONS`. The `ensure_*` commands are async and resolve with the user's actual answer. SSDP needs a held WiFi multicast lock for the duration of the scan; the Rust wrapper acquires and releases it around `discover_roku_devices_impl`.
+**Permissions.** The app targets Android 17 (API 37), where *all* LAN traffic — SSDP, the subnet sweep and every ECP request, native sockets included — needs the runtime permission `ACCESS_LOCAL_NETWORK`. Without it requests time out rather than fail fast, so the frontend asks for it (`ensure_android_local_network_access`) as soon as a saved device exists and mounts nothing that polls a device until it is granted. While it is denied, `check_android_local_network_access` (which never prompts) is asked again each time the app returns to the foreground, so a grant made in system Settings takes effect. On Android 13–16 discovery asks for nearby-devices / location instead. Notifications need `POST_NOTIFICATIONS`. The `ensure_*` commands are async and resolve with the user's actual answer. SSDP needs a held WiFi multicast lock for the duration of the scan; the Rust wrapper acquires and releases it around `discover_roku_devices_impl`.
 
 **Process exit.** When the activity is destroyed (the app is swiped out of Recents) Tauri ends the process. `run()` handles `RunEvent::Exit` by calling `_exit` instead of letting `std::process::exit` run static destructors: those ran while Tokio and WebView threads were still alive, which intermittently aborted the already-backgrounded app with "pthread_mutex_lock called on a destroyed mutex".
 

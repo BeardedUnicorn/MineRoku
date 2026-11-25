@@ -3,7 +3,7 @@
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the runtime topology, IPC surface, SQLite schema, and Android JNI bridge.
 
 ## Project Structure & Module Organization
-- Frontend (`src/`): React + TypeScript app. Components in `src/components/`, hooks in `src/hooks/`, Tauri command wrappers in `src/services/rokuClient.ts`, Zustand store in `src/store.ts`, styles in `src/*.css`.
+- Frontend (`src/`): React + TypeScript app. Components in `src/components/`, hooks in `src/hooks/`, Tauri command wrappers in `src/services/rokuClient.ts`, Zustand store in `src/store.ts`. Styling is MUI `sx` on design tokens in `src/tokens.ts` and the theme in `src/theme.ts`.
 - Backend (`src-tauri/`): Tauri 2 Rust app (`src-tauri/src/{main.rs,lib.rs,commands.rs,background.rs,background_discovery.rs}`), config in `src-tauri/tauri.conf.json`.
 - Rust crates (`crates/`): vendored forks. `crates/roku` is the ECP client. `crates/ssdp-client` is the SSDP library used for device discovery: a vendored copy of upstream v2.1.0 carrying Android patches in `src/search.rs` (binds SSDP to `wlan0` to bypass VPNs), so don't swap it for the crates.io release.
 - Android (`src-tauri/gen/android/`): Kotlin sources for the lock-screen MediaSession, the home-screen widget and permissions under `app/src/main/java/com/rokucontroller/remote/`; widget layouts and icons under `app/src/main/res/`.
@@ -26,6 +26,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the runtime topology, IPC surface, SQ
 - TypeScript strict mode; prefer explicit types at boundaries.
 - Indentation: 2 spaces; avoid trailing whitespace.
 - React components: PascalCase (`RemoteControl.tsx`), hooks `useX` camelCase.
+- Styling: take colors, radii and motion from `src/tokens.ts`. Write radii as the `radius` tokens, not numbers: numeric `borderRadius` in `sx` multiplies `theme.shape.borderRadius`, which must stay 4 because the remote depends on it. The remote's look lives in `src/components/remoteStyleTokens.ts` and must not read the app theme.
 - Tests: filename `ComponentName.test.tsx`; use Testing Library queries by role/text.
 - Rust: snake_case for functions/modules; keep commands in `src-tauri/src/commands.rs` small and async where appropriate.
 

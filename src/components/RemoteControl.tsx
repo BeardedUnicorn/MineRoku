@@ -1,14 +1,10 @@
 import React, { lazy, Suspense, useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { iconCache, ICON_CACHE_TTL_MS, ICON_CACHE_LIMIT } from '../iconCache';
 import {
-  Button,
   ButtonBase,
   Box,
   Paper,
   Typography,
   IconButton,
-  Snackbar,
-  Alert,
   useTheme,
   useMediaQuery,
   Tooltip,
@@ -16,7 +12,6 @@ import {
   Divider,
   CircularProgress,
   LinearProgress,
-  Portal,
 } from '@mui/material';
 import { motion, useReducedMotion } from 'framer-motion';
 import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp';
@@ -24,6 +19,7 @@ import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import KeyboardArrowLeftIcon from '@mui/icons-material/KeyboardArrowLeft';
 import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
 import RadioButtonCheckedIcon from '@mui/icons-material/RadioButtonChecked';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import {
   CommandSpec,
   systemButtonSpecs,
@@ -33,6 +29,9 @@ import {
 } from './RemoteButtonSpecs';
 import { RokuDevice, useAppStore } from '../store';
 import { usePlatform } from '../hooks/usePlatform';
+import { useAppIcon } from '../hooks/useAppIcon';
+import { useToast } from './ToastProvider';
+import { formatTime, parseTime } from '../utils/time';
 import {
   getDpadMetrics,
   getDpadSize,
@@ -42,7 +41,6 @@ import {
 import {
   ensureAndroidNotificationPermission,
   getActiveApp,
-  getAppIcon,
   getMediaPlayer,
   hapticTap,
   openAndroidAppSettings,
@@ -61,8 +59,6 @@ type ActiveApp = ActiveAppInfo;
 interface RemoteControlProps {
   device: RokuDevice;
 }
-
-type FeedbackState = { message: string; severity: 'success' | 'error' } | null;
 
 // Presses wait their turn instead of being dropped, up to this many.
 const MAX_QUEUED_COMMANDS = 8;
@@ -154,7 +150,7 @@ const RemoteButton: React.FC<RemoteButtonProps> = ({
   const contrast = isFilled
     ? styleTokens.centerButtonColor
     : isError
-    ? theme.palette.error.contrastText
+    ? styleTokens.powerButtonColor
     : styleTokens.flatButtonColor;
 
   const background = isFilled
@@ -162,13 +158,13 @@ const RemoteButton: React.FC<RemoteButtonProps> = ({
     : ring
     ? 'transparent'
     : isError
-    ? theme.palette.error.dark
+    ? styleTokens.powerButtonBackground
     : styleTokens.flatButtonBackground;
 
   const hoverBackground = isFilled
     ? styleTokens.centerButtonHoverBackground
     : isError
-    ? theme.palette.error.main
+    ? styleTokens.powerButtonHoverBackground
     : styleTokens.flatButtonHoverBackground;
 
   return (
@@ -222,59 +218,6 @@ const RemoteButton: React.FC<RemoteButtonProps> = ({
   );
 };
 
-const useActiveAppIcon = (device: RokuDevice, app: ActiveApp | null) => {
-  const [icon, setIcon] = useState<string | null>(null);
-  const lastKeyRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (!app || app.id === 'roku') {
-      setIcon(null);
-      lastKeyRef.current = null;
-      return;
-    }
-
-    const cacheKey = `${device.ip}:${device.port}:${app.id}`;
-    if (lastKeyRef.current === cacheKey) return;
-
-    const cached = iconCache.get(cacheKey);
-    if (cached && Date.now() - cached.timestamp < ICON_CACHE_TTL_MS) {
-      setIcon(cached.data);
-      lastKeyRef.current = cacheKey;
-      return;
-    } else if (cached) {
-      iconCache.delete(cacheKey);
-    }
-
-    let cancelled = false;
-    setIcon(null);
-
-    const loadIcon = async () => {
-      try {
-        const iconData = await getAppIcon(device.ip, device.port, app.id);
-        if (cancelled) return;
-        iconCache.set(cacheKey, { data: iconData, timestamp: Date.now() });
-        if (iconCache.size > ICON_CACHE_LIMIT) {
-          const oldestKey = iconCache.keys().next().value as string;
-          iconCache.delete(oldestKey);
-        }
-        setIcon(iconData);
-        lastKeyRef.current = cacheKey;
-      } catch (error) {
-        if (!cancelled) {
-          console.error(`Error fetching icon for ${app.name}:`, error);
-        }
-      }
-    };
-
-    loadIcon();
-    return () => {
-      cancelled = true;
-    };
-  }, [device.ip, device.port, app?.id]);
-
-  return icon;
-};
-
 const ActiveAppIcon: React.FC<{ app: ActiveApp; icon: string | null }> = ({ app, icon }) => {
   if (app.id === 'roku' || !icon) return null;
 
@@ -290,8 +233,7 @@ const ActiveAppIcon: React.FC<{ app: ActiveApp; icon: string | null }> = ({ app,
 
 const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
   const theme = useTheme();
-  const [feedback, setFeedback] = useState<FeedbackState>(null);
-  const [showSettingsAction, setShowSettingsAction] = useState(false);
+  const showToast = useToast();
   const [activeApp, setActiveApp] = useState<ActiveApp | null>(null);
   const [isAppLoading, setIsAppLoading] = useState<boolean>(true);
   const [mediaInfo, setMediaInfo] = useState<MediaPlayerInfo | null>(null);
@@ -311,7 +253,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
   const fitsPhoneDpad = useMediaQuery('(min-width:356px)');
   const currentPlatform = usePlatform();
   const isConnected = device.status === 'connected';
-  const activeAppIcon = useActiveAppIcon(device, activeApp);
+  const activeAppIcon = useAppIcon(device, activeApp && activeApp.id !== 'roku' ? activeApp.id : null);
   const dpadMetrics = useMemo(
     () => getDpadMetrics(isPhone && fitsPhoneDpad),
     [isPhone, fitsPhoneDpad]
@@ -325,24 +267,6 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
   useEffect(() => {
     deviceStatusRef.current = device.status;
   }, [device.status]);
-
-  const parseTime = (timeStr?: string): number => {
-    if (!timeStr) return 0;
-    const match = timeStr.match(/(\d+)/);
-    return match ? parseInt(match[1], 10) : 0;
-  };
-
-  const formatTime = (ms: number): string => {
-    const totalSeconds = Math.floor(ms / 1000);
-    const hours = Math.floor(totalSeconds / 3600);
-    const minutes = Math.floor((totalSeconds % 3600) / 60);
-    const seconds = totalSeconds % 60;
-
-    if (hours > 0) {
-      return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-    }
-    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
-  };
 
   useEffect(() => {
     if (abortControllerRef.current) {
@@ -389,10 +313,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
         console.error('Could not fetch active app on initial load:', error);
         const fallbackApp = { name: 'Home Screen', id: 'roku' };
         setActiveApp(fallbackApp);
-        setFeedback({ 
-          message: `Could not fetch active app: ${error}`, 
-          severity: 'error' 
-        });
+        showToast({ message: `Could not fetch active app: ${error}`, severity: 'error' });
       } finally {
         clearTimeout(timeoutId);
         if (!abortController.signal.aborted) {
@@ -538,16 +459,13 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
         } catch (error) {
           console.error(`Error sending command ${command}:`, error);
           queueGenerationRef.current += 1;
-          setFeedback({
-            message: `Error: ${String(error)}`,
-            severity: 'error',
-          });
+          showToast({ message: `Error: ${String(error)}`, severity: 'error' });
         } finally {
           queuedCommandsRef.current -= 1;
         }
       });
     },
-    [device.ip, device.port, currentPlatform]
+    [device.ip, device.port, currentPlatform, showToast]
   );
 
   useEffect(() => {
@@ -634,14 +552,21 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
           const hasPermission = await ensureAndroidNotificationPermission();
           notificationPermission = hasPermission ? 'granted' : 'denied';
           if (!hasPermission) {
-            setShowSettingsAction(true);
-            setFeedback({
+            // The Settings button travels with this message only.
+            showToast({
               message: 'Allow notifications to get lock-screen controls for your Roku.',
               severity: 'error',
+              action: {
+                label: 'Settings',
+                onClick: () => {
+                  void openAndroidAppSettings().catch((error) => {
+                    console.error('Failed to open Android app settings:', error);
+                  });
+                },
+              },
             });
             return;
           }
-          setShowSettingsAction(false);
         }
 
         const mediaState = mediaInfo?.state?.toLowerCase();
@@ -769,10 +694,12 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
             alignItems: 'center',
             justifyContent: 'center',
             gap: 1.5,
+            position: 'relative',
             minHeight: 48,
-            px: 2,
+            px: 4,
             py: 1,
             borderRadius: 2,
+            border: '1px solid rgba(255,255,255,0.1)',
             backgroundColor: styleTokens.appPillBackground,
             transition: 'background-color 0.2s',
             touchAction: 'manipulation',
@@ -795,6 +722,11 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
               Home Screen
             </Typography>
           )}
+          {/* Says "this opens something" without moving the centered label. */}
+          <ChevronRightIcon
+            aria-hidden
+            sx={{ position: 'absolute', right: 10, fontSize: 18, opacity: 0.6 }}
+          />
         </ButtonBase>
 
         {/* Always in the layout, only hidden when there is nothing to show: the remote keeps the
@@ -819,10 +751,10 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
               }}
             />
             <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 0.5 }}>
-              <Typography variant="caption" sx={{ fontSize: '0.7rem', color: 'text.secondary' }}>
+              <Typography variant="caption" sx={{ fontSize: '0.7rem', color: 'text.secondary', fontVariantNumeric: 'tabular-nums' }}>
                 {formatTime(position)}
               </Typography>
-              <Typography variant="caption" sx={{ fontSize: '0.7rem', color: 'text.secondary' }}>
+              <Typography variant="caption" sx={{ fontSize: '0.7rem', color: 'text.secondary', fontVariantNumeric: 'tabular-nums' }}>
                 {formatTime(duration)}
               </Typography>
             </Box>
@@ -884,6 +816,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
                 icon={<KeyboardArrowUpIcon />}
                 onSend={sendCommand}
                 ring
+                currentPlatform={currentPlatform}
                 shortcut="↑"
                 size={dpadMetrics.arrowSize}
                 styleTokens={styleTokens}
@@ -896,6 +829,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
                 icon={<KeyboardArrowDownIcon />}
                 onSend={sendCommand}
                 ring
+                currentPlatform={currentPlatform}
                 shortcut="↓"
                 size={dpadMetrics.arrowSize}
                 styleTokens={styleTokens}
@@ -908,6 +842,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
                 icon={<KeyboardArrowLeftIcon />}
                 onSend={sendCommand}
                 ring
+                currentPlatform={currentPlatform}
                 shortcut="←"
                 size={dpadMetrics.arrowSize}
                 styleTokens={styleTokens}
@@ -920,6 +855,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
                 icon={<KeyboardArrowRightIcon />}
                 onSend={sendCommand}
                 ring
+                currentPlatform={currentPlatform}
                 shortcut="→"
                 size={dpadMetrics.arrowSize}
                 styleTokens={styleTokens}
@@ -936,6 +872,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
                 shortcut="Enter"
                 size={dpadMetrics.centerSize}
                 center
+                currentPlatform={currentPlatform}
                 styleTokens={styleTokens}
               />
             </Box>
@@ -1004,41 +941,6 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
           />
         </Suspense>
       )}
-
-      {/* Portaled out of the card: the Glass style's backdrop-filter would otherwise make the card
-          the containing block and clip the message. Raised above the bottom nav on phones. */}
-      <Portal>
-      <Snackbar
-        open={!!feedback}
-        autoHideDuration={4000}
-        onClose={() => setFeedback(null)}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-        sx={{ bottom: { xs: 'calc(88px + env(safe-area-inset-bottom))', md: 24 } }}
-      >
-        <Alert
-          onClose={() => setFeedback(null)}
-          severity={feedback?.severity}
-          sx={{ width: '100%' }}
-          action={
-            showSettingsAction ? (
-              <Button
-                color="inherit"
-                size="small"
-                onClick={() => {
-                  void openAndroidAppSettings().catch((error) => {
-                    console.error('Failed to open Android app settings:', error);
-                  });
-                }}
-              >
-                Settings
-              </Button>
-            ) : undefined
-          }
-        >
-          {feedback?.message}
-        </Alert>
-      </Snackbar>
-      </Portal>
     </Paper>
   );
 };

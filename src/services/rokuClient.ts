@@ -303,6 +303,11 @@ export async function ensureAndroidLocalNetworkAccess(): Promise<boolean> {
   return invoke<boolean>('ensure_android_local_network_access');
 }
 
+/** Whether local network access is granted right now. Unlike the `ensure` call, never prompts. */
+export async function checkAndroidLocalNetworkAccess(): Promise<boolean> {
+  return invoke<boolean>('check_android_local_network_access');
+}
+
 /** A short haptic tick on Android; a no-op elsewhere. Never rejects. */
 export function hapticTap(): void {
   void invoke<void>('haptic_tap').catch(() => undefined);

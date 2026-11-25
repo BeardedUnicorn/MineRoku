@@ -6,6 +6,29 @@ heading into the new version's. Each section becomes that release's notes on
 GitHub, and the in-app update dialog shows the sections since the installed
 version (README's "Releasing").
 
+## Unreleased
+
+### Changed
+- A new look: deep purple surfaces taken from the app icon, a lighter accent that is readable as text, a bundled typeface (Inter), rounder shapes and a visible keyboard focus ring. The remote keeps its layout, buttons and four styles; the Classic style is tinted to match.
+- Settings opens from a gear in the top bar, and is a full screen on phones. Remote style is picked from four previews with one tap.
+- Phones: the device list opens as a sheet from the device name in the top bar, replacing the side drawer behind a menu button.
+- Apps are one scrolling grid instead of pages, under a search field that stays in view. Tap an app's artwork to launch it.
+- Device scans are called "Scan" everywhere; "Refresh apps" reloads the app list.
+- Desktop: the window can no longer be made smaller than the remote needs, and a short window scrolls the remote instead of cutting it off.
+- Android: the widget's accent and its device picker use the app's colors (Android 12+ widgets still follow the wallpaper).
+
+### Added
+- Favorites on the remote screen: starred apps launch with one tap, without opening Apps.
+- With devices saved but none selected, the app lists them to pick from instead of asking you to find the device list.
+- A scan started from the device list says what it found.
+
+### Fixed
+- Android: after allowing local network access in system Settings, the remote appears when you come back, without tapping Allow again.
+- The Settings button from the notification-permission message no longer appears on later, unrelated error messages.
+- Keyboard shortcuts keep working on the Apps tab in a narrow desktop window.
+- The mute button's icon reads as mute; the D-pad no longer shows keyboard hints on phones.
+- About opens this project's GitHub page, where releases are published.
+
 ## 0.3.1 – 2026-11-24
 
 ### Fixed

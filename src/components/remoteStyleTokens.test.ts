@@ -29,4 +29,18 @@ describe('remoteStyleTokens', () => {
     expect(unknown.cardBackground).toBe(classic.cardBackground);
     expect(unknown.centerButtonBackground).toBe(classic.centerButtonBackground);
   });
+
+  it('keeps the OK and power buttons the same whatever the app theme is', () => {
+    const light = createTheme({ palette: { mode: 'light', primary: { main: '#00ff00' }, error: { main: '#0000ff' } } });
+
+    expect(getRemoteStyleTokens('classic', light).centerButtonBackground).toBe(
+      'linear-gradient(145deg, #8e65cf, #673ab7)'
+    );
+    (['classic', 'studio', 'glass', 'highContrast'] as const).forEach((style) => {
+      const tokens = getRemoteStyleTokens(style, light);
+      expect(tokens.powerButtonBackground).toBe('#d32f2f');
+      expect(tokens.powerButtonHoverBackground).toBe('#f44336');
+      expect(tokens.powerButtonColor).toBe('#ffffff');
+    });
+  });
 });

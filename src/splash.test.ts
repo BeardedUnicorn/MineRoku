@@ -4,6 +4,7 @@ import { getRemoteStyleTokens } from './components/remoteStyleTokens';
 import { dismissSplash } from './splash';
 import { remoteStylePresets } from './store';
 import theme from './theme';
+import { tokens } from './tokens';
 
 describe('dismissSplash', () => {
   beforeEach(() => {
@@ -60,7 +61,7 @@ describe('index.html', () => {
 
   it('styles the first paint without waiting for the JS bundle', () => {
     expect(head.querySelector('meta[name="color-scheme"]')?.getAttribute('content')).toBe('dark');
-    expect(inlineCss).toMatch(/html\s*{[^}]*background:\s*#121212/);
+    expect(inlineCss).toMatch(new RegExp(`html\\s*{[^}]*background:\\s*${tokens.bg}`, 'i'));
     expect(inlineCss).toMatch(/\.skip-link\s*{[^}]*top:\s*-48px/);
   });
 
