@@ -15,7 +15,9 @@ import {
   useMediaQuery,
   Button,
 } from '@mui/material';
+import { alpha } from '@mui/material/styles';
 import { motion } from 'framer-motion';
+import { tokens } from './tokens';
 import TvIcon from '@mui/icons-material/Tv';
 import SearchOffIcon from '@mui/icons-material/SearchOff';
 import WifiOffIcon from '@mui/icons-material/WifiOff';
@@ -627,7 +629,7 @@ const App: React.FC = () => {
             alignItems: 'center',
             flexDirection: 'row',
             flexShrink: 0,
-            backgroundColor: { xs: 'rgba(18,18,18,0.88)', md: 'transparent' },
+            backgroundColor: { xs: alpha(tokens.surfaceLowest, 0.88), md: 'transparent' },
             backdropFilter: { xs: 'blur(10px)', md: 'none' },
           }}
         >

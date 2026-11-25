@@ -274,13 +274,6 @@ const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({ open, onClose, devi
             onClose={onClose}
             maxWidth="sm"
             fullWidth
-            slotProps={{
-                paper: {
-                    sx: {
-                        borderRadius: 2,
-                    }
-                }
-            }}
         >
             <DialogTitle sx={{ m: 0, p: 2 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>

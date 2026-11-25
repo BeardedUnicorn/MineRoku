@@ -1,6 +1,9 @@
 
 import React from 'react';
 import { BottomNavigation, BottomNavigationAction, Paper } from '@mui/material';
+import { alpha } from '@mui/material/styles';
+import { BOTTOM_NAV_HEIGHT } from '../layout';
+import { tokens } from '../tokens';
 import AppsIcon from '@mui/icons-material/Apps';
 import RemoteControlIcon from '@mui/icons-material/SettingsRemote';
 
@@ -24,22 +27,21 @@ const BottomNavBar: React.FC<BottomNavBarProps> = ({ view, setView }) => {
                 zIndex: 1000,
                 borderTop: '1px solid',
                 borderColor: 'divider',
-                backgroundColor: 'rgba(18, 18, 18, 0.92)',
+                backgroundColor: alpha(tokens.surfaceLowest, 0.92),
                 backdropFilter: 'blur(12px)',
                 paddingBottom: 'env(safe-area-inset-bottom)',
             }}
-            elevation={8}
         >
             <BottomNavigation
                 value={view}
                 onChange={handleChange}
                 showLabels
                 sx={{
-                    height: 72,
+                    height: BOTTOM_NAV_HEIGHT,
                     backgroundColor: 'transparent',
                     '& .MuiBottomNavigationAction-root': {
-                        minHeight: 64,
-                        py: 1,
+                        minHeight: BOTTOM_NAV_HEIGHT,
+                        py: 0.75,
                     },
                     '& .MuiBottomNavigationAction-label': {
                         fontSize: '0.78rem',
@@ -49,7 +51,7 @@ const BottomNavBar: React.FC<BottomNavBarProps> = ({ view, setView }) => {
                         },
                     },
                     '& .MuiSvgIcon-root': {
-                        fontSize: 28,
+                        fontSize: 26,
                     },
                 }}
             >

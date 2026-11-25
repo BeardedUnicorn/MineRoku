@@ -2,10 +2,10 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="color-scheme" content="dark" />
-    <meta name="theme-color" content="#121212" />
+    <meta name="theme-color" content="#150F26" />
     <title>Roku Remote</title>
     <script>
       // Pick the splash accent from the saved remote style (see src/store.ts).
@@ -46,12 +46,12 @@
 
       html {
         color-scheme: dark;
-        background: #121212;
+        background: #150F26;
       }
 
       body {
         margin: 0;
-        background: #121212;
+        background: #150F26;
       }
 
       .skip-link {
@@ -62,7 +62,7 @@
         padding: 8px 12px;
         border-radius: 8px;
         background: #ffffff;
-        color: #121212;
+        color: #150F26;
         text-decoration: none;
         font-weight: 600;
         transition: top 0.2s ease;
@@ -81,7 +81,7 @@
         align-items: center;
         justify-content: center;
         overflow: hidden;
-        background: #121212;
+        background: #150F26;
       }
 
       #app-splash[data-state='leaving'] {
@@ -137,14 +137,15 @@
 
       .splash-cutout {
         fill: none;
-        stroke: #121212;
+        stroke: #150F26;
         stroke-width: 20;
       }
 
       .splash-wordmark {
         position: relative;
         color: #ffffff;
-        font-family: 'Roboto', 'Helvetica', 'Arial', sans-serif;
+        /* The bundled typeface is not loaded yet. */
+        font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
         font-size: 20px;
         font-weight: 600;
         letter-spacing: 0.02em;
@@ -251,13 +252,13 @@
               d="M342 564 H244 a16 16 0 0 1 -16 -16 V318 a16 16 0 0 1 16 -16 H780 a16 16 0 0 1 16 16 V548 a16 16 0 0 1 -16 16 H682"
             />
             <rect x="385" y="376" width="254" height="498" rx="100" fill="url(#splash-remote-fill)" />
-            <rect x="482" y="426" width="60" height="24" rx="12" fill="#121212" />
+            <rect x="482" y="426" width="60" height="24" rx="12" fill="#150F26" />
             <circle class="splash-cutout" cx="512" cy="589" r="92" />
             <path class="splash-cutout" d="M512 497 V681 M420 589 H604" />
             <path
               d="M512 728 L556 768 H544 V812 H480 V768 H468 Z"
-              fill="#121212"
-              stroke="#121212"
+              fill="#150F26"
+              stroke="#150F26"
               stroke-width="8"
               stroke-linejoin="round"
             />

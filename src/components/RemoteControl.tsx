@@ -19,6 +19,7 @@ import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import KeyboardArrowLeftIcon from '@mui/icons-material/KeyboardArrowLeft';
 import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
 import RadioButtonCheckedIcon from '@mui/icons-material/RadioButtonChecked';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import {
   CommandSpec,
   systemButtonSpecs,
@@ -149,7 +150,7 @@ const RemoteButton: React.FC<RemoteButtonProps> = ({
   const contrast = isFilled
     ? styleTokens.centerButtonColor
     : isError
-    ? theme.palette.error.contrastText
+    ? styleTokens.powerButtonColor
     : styleTokens.flatButtonColor;
 
   const background = isFilled
@@ -157,13 +158,13 @@ const RemoteButton: React.FC<RemoteButtonProps> = ({
     : ring
     ? 'transparent'
     : isError
-    ? theme.palette.error.dark
+    ? styleTokens.powerButtonBackground
     : styleTokens.flatButtonBackground;
 
   const hoverBackground = isFilled
     ? styleTokens.centerButtonHoverBackground
     : isError
-    ? theme.palette.error.main
+    ? styleTokens.powerButtonHoverBackground
     : styleTokens.flatButtonHoverBackground;
 
   return (
@@ -693,10 +694,12 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
             alignItems: 'center',
             justifyContent: 'center',
             gap: 1.5,
+            position: 'relative',
             minHeight: 48,
-            px: 2,
+            px: 4,
             py: 1,
             borderRadius: 2,
+            border: '1px solid rgba(255,255,255,0.1)',
             backgroundColor: styleTokens.appPillBackground,
             transition: 'background-color 0.2s',
             touchAction: 'manipulation',
@@ -719,6 +722,11 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
               Home Screen
             </Typography>
           )}
+          {/* Says "this opens something" without moving the centered label. */}
+          <ChevronRightIcon
+            aria-hidden
+            sx={{ position: 'absolute', right: 10, fontSize: 18, opacity: 0.6 }}
+          />
         </ButtonBase>
 
         {/* Always in the layout, only hidden when there is nothing to show: the remote keeps the
@@ -743,10 +751,10 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
               }}
             />
             <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 0.5 }}>
-              <Typography variant="caption" sx={{ fontSize: '0.7rem', color: 'text.secondary' }}>
+              <Typography variant="caption" sx={{ fontSize: '0.7rem', color: 'text.secondary', fontVariantNumeric: 'tabular-nums' }}>
                 {formatTime(position)}
               </Typography>
-              <Typography variant="caption" sx={{ fontSize: '0.7rem', color: 'text.secondary' }}>
+              <Typography variant="caption" sx={{ fontSize: '0.7rem', color: 'text.secondary', fontVariantNumeric: 'tabular-nums' }}>
                 {formatTime(duration)}
               </Typography>
             </Box>
@@ -808,6 +816,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
                 icon={<KeyboardArrowUpIcon />}
                 onSend={sendCommand}
                 ring
+                currentPlatform={currentPlatform}
                 shortcut="↑"
                 size={dpadMetrics.arrowSize}
                 styleTokens={styleTokens}
@@ -820,6 +829,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
                 icon={<KeyboardArrowDownIcon />}
                 onSend={sendCommand}
                 ring
+                currentPlatform={currentPlatform}
                 shortcut="↓"
                 size={dpadMetrics.arrowSize}
                 styleTokens={styleTokens}
@@ -832,6 +842,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
                 icon={<KeyboardArrowLeftIcon />}
                 onSend={sendCommand}
                 ring
+                currentPlatform={currentPlatform}
                 shortcut="←"
                 size={dpadMetrics.arrowSize}
                 styleTokens={styleTokens}
@@ -844,6 +855,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
                 icon={<KeyboardArrowRightIcon />}
                 onSend={sendCommand}
                 ring
+                currentPlatform={currentPlatform}
                 shortcut="→"
                 size={dpadMetrics.arrowSize}
                 styleTokens={styleTokens}
@@ -860,6 +872,7 @@ const RemoteControl: React.FC<RemoteControlProps> = ({ device }) => {
                 shortcut="Enter"
                 size={dpadMetrics.centerSize}
                 center
+                currentPlatform={currentPlatform}
                 styleTokens={styleTokens}
               />
             </Box>
