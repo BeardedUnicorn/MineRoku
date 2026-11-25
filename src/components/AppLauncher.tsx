@@ -8,8 +8,6 @@ import {
     CardMedia,
     CircularProgress,
     Button,
-    Snackbar,
-    Alert,
     TextField,
     InputAdornment,
     Pagination,
@@ -23,9 +21,9 @@ import SearchIcon from '@mui/icons-material/Search';
 import StarIcon from '@mui/icons-material/Star';
 import StarBorderIcon from '@mui/icons-material/StarBorder';
 import { useAppStore, RokuDevice } from '../store';
-import { iconCache, ICON_CACHE_TTL_MS, ICON_CACHE_LIMIT } from '../iconCache';
+import { useAppIcon } from '../hooks/useAppIcon';
+import { useToast } from './ToastProvider';
 import {
-    getAppIcon,
     getCachedApps,
     launchRokuApp,
     listRokuApps,
@@ -46,51 +44,7 @@ const MAX_ITEMS_PER_PAGE = 60;
 const NO_FAVORITES: string[] = [];
 
 const AppIcon: React.FC<{ device: RokuDevice; appId: string; appName: string; size?: number }> = ({ device, appId, appName, size = 120 }) => {
-    const cacheKey = `${device.ip}:${device.port}:${appId}`;
-    const [icon, setIcon] = useState<string | null>(() => {
-        const cached = iconCache.get(cacheKey);
-        if (cached && Date.now() - cached.timestamp < ICON_CACHE_TTL_MS) {
-            return cached.data;
-        }
-        return null;
-    });
-
-    useEffect(() => {
-        const cached = iconCache.get(cacheKey);
-        if (cached && Date.now() - cached.timestamp < ICON_CACHE_TTL_MS) {
-            setIcon(cached.data);
-            return;
-        } else if (cached) {
-            iconCache.delete(cacheKey);
-        }
-
-        let cancelled = false;
-
-        const fetchIcon = async () => {
-            try {
-                const iconData = await getAppIcon(device.ip, device.port, appId);
-                if (cancelled) {
-                    return;
-                }
-                iconCache.set(cacheKey, { data: iconData, timestamp: Date.now() });
-                if (iconCache.size > ICON_CACHE_LIMIT) {
-                    const oldestKey = iconCache.keys().next().value as string;
-                    iconCache.delete(oldestKey);
-                }
-                setIcon(iconData);
-            } catch (error) {
-                if (!cancelled) {
-                    console.error(`Error fetching icon for ${appName}:`, error);
-                }
-            }
-        };
-
-        void fetchIcon();
-
-        return () => {
-            cancelled = true;
-        };
-    }, [device.ip, device.port, appId, cacheKey]);
+    const icon = useAppIcon(device, appId);
 
     const sxProps = {
         height: size,
@@ -128,7 +82,7 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
     const [apps, setApps] = useState<RokuApp[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [isLaunching, setIsLaunching] = useState<string | null>(null);
-    const [feedback, setFeedback] = useState<{ message: string; severity: 'success' | 'error' } | null>(null);
+    const showToast = useToast();
     const [searchTerm, setSearchTerm] = useState('');
     const [currentPage, setCurrentPage] = useState(1);
     const [itemsPerPage, setItemsPerPage] = useState(12);
@@ -300,23 +254,23 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
                 return;
             }
 
-            setFeedback({ message: `Error fetching apps: ${errorMessage}`, severity: 'error' });
+            showToast({ message: `Error fetching apps: ${errorMessage}`, severity: 'error' });
         }
         setIsLoading(false);
-    }, [device.ip, device.port]);
+    }, [device.ip, device.port, showToast]);
 
     const launchApp = async (appId: string, appName: string) => {
         if (device.status && device.status !== 'connected') {
-            setFeedback({ message: 'Device appears offline', severity: 'error' });
+            showToast({ message: 'Device appears offline', severity: 'error' });
             return;
         }
         setIsLaunching(appId);
         try {
             await launchRokuApp(device.ip, device.port, appId);
-            setFeedback({ message: `Launched "${appName}"`, severity: 'success' });
+            showToast({ message: `Launched "${appName}"`, severity: 'success' });
         } catch (error) {
             console.error(`Error launching app:`, error);
-            setFeedback({ message: `Error launching "${appName}": ${errorText(error)}`, severity: 'error' });
+            showToast({ message: `Error launching "${appName}": ${errorText(error)}`, severity: 'error' });
         } finally {
             setIsLaunching(null);
         }
@@ -538,23 +492,6 @@ const AppLauncher: React.FC<AppLauncherProps> = ({ device }) => {
                     </Box>
                 )}
             </Box>
-
-            <Snackbar 
-                open={!!feedback} 
-                autoHideDuration={4000} 
-                onClose={() => setFeedback(null)} 
-                anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-                sx={{ bottom: { xs: 'calc(88px + env(safe-area-inset-bottom))', md: 24 } }}
-            >
-                <Alert 
-                    onClose={() => setFeedback(null)} 
-                    severity={feedback?.severity} 
-                    sx={{ width: '100%' }}
-                    variant="filled"
-                >
-                    {feedback?.message}
-                </Alert>
-            </Snackbar>
         </Box>
     );
 };

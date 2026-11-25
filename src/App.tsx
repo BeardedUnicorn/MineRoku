@@ -14,7 +14,6 @@ import {
   useTheme,
   useMediaQuery,
   Button,
-  Tooltip,
 } from '@mui/material';
 import { motion } from 'framer-motion';
 import TvIcon from '@mui/icons-material/Tv';
@@ -23,6 +22,7 @@ import WifiOffIcon from '@mui/icons-material/WifiOff';
 import MenuIcon from '@mui/icons-material/Menu';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import BottomNavBar from './components/BottomNavBar';
+import StatusDot from './components/StatusDot';
 import './App.css';
 import { useAppStore, type RokuDevice } from './store';
 import { useShallow } from 'zustand/react/shallow';
@@ -654,19 +654,7 @@ const App: React.FC = () => {
                 {selectedDevice ? selectedDevice.name : 'Roku Remote'}
               </Typography>
               {selectedDevice && (
-                <Tooltip title={selectedDevice.status === 'connected' ? 'Online' : 'Offline'}>
-                  <Box
-                    role="img"
-                    aria-label={selectedDevice.status === 'connected' ? 'Device online' : 'Device offline'}
-                    sx={{
-                      width: 10,
-                      height: 10,
-                      borderRadius: '50%',
-                      bgcolor: selectedDevice.status === 'connected' ? 'success.main' : 'text.disabled',
-                      flexShrink: 0,
-                    }}
-                  />
-                </Tooltip>
+                <StatusDot online={selectedDevice.status === 'connected'} />
               )}
             </Box>
           </Toolbar>

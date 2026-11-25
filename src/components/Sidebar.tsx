@@ -19,6 +19,7 @@ import { useBackHandler } from '../hooks/useBackHandler';
 import { clearAllData, forgetDevice, hideMediaNotification, restartApp } from '../services/rokuClient';
 import { remoteStyleLabels } from './remoteStyleTokens';
 import UpdatesSection from './UpdatesSection';
+import StatusDot from './StatusDot';
 import { resetUpdates } from '../services/updates';
 
 interface SidebarProps {
@@ -244,19 +245,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, scanForDevices, isS
                                             }
                                         }}
                                     />
-                                    <Tooltip title={isOnline ? 'Online' : 'Offline'}>
-                                        <Box
-                                            role="img"
-                                            aria-label={isOnline ? 'Device online' : 'Device offline'}
-                                            sx={{
-                                                width: 10,
-                                                height: 10,
-                                                flexShrink: 0,
-                                                borderRadius: '50%',
-                                                bgcolor: isOnline ? 'success.main' : 'text.disabled',
-                                            }}
-                                        />
-                                    </Tooltip>
+                                    <StatusDot online={isOnline} />
                                 </ListItemButton>
                             </ListItem>
                         );
