@@ -7,6 +7,7 @@ import App from './App';
 import { renderWithTheme } from './testUtils';
 import { useAppStore, type RokuDevice } from './store';
 import { resetPlatformForTests } from './hooks/usePlatform';
+import { resetApps } from './services/appsStore';
 
 const device: RokuDevice = {
   name: 'Living Room',
@@ -63,6 +64,7 @@ const setPlatform = (value: string) => {
 
 beforeEach(() => {
   localStorage.clear();
+  resetApps();
   vi.mocked(invoke).mockReset();
   useAppStore.setState({
     devices: [],
@@ -186,6 +188,27 @@ describe('App on a phone-sized window', () => {
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Devices' })).not.toBeInTheDocument());
   });
 
+  it('launches a favorite from the remote screen in one tap', async () => {
+    useAppStore.setState({
+      devices: [device],
+      selectedDevice: device,
+      favoriteApps: { [device.hardware_id]: ['12'] },
+    });
+    mockInvoke({ list_roku_apps: () => [{ id: '12', name: 'Netflix', version: '1.0' }] });
+    renderWithTheme(<App />);
+
+    const favorites = await screen.findByRole('region', { name: 'Favorites' });
+    await userEvent.click(within(favorites).getByRole('button', { name: 'Launch Netflix' }));
+
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith('launch_roku_app', {
+      ip: device.ip,
+      port: device.port,
+      appId: '12',
+    });
+    // Still on the remote: the apps grid was never opened.
+    expect(screen.queryByLabelText(/search apps/i)).not.toBeInTheDocument();
+  });
+
   it('keeps the remote mounted, and its shortcuts working, on the Apps tab', async () => {
     useAppStore.setState({ devices: [device], selectedDevice: device });
     mockInvoke();
@@ -251,8 +274,11 @@ describe('App on Android', () => {
     // Still denied: coming back changes nothing and does not prompt again.
     const prompts = () => calledCommands().filter((cmd) => cmd === 'ensure_android_local_network_access').length;
     const promptsBefore = prompts();
-    fireEvent(document, new Event('visibilitychange'));
-    await waitFor(() => expect(calledCommands()).toContain('check_android_local_network_access'));
+    // Fired inside waitFor: the listener is attached in an effect, just after the card appears.
+    await waitFor(() => {
+      fireEvent(document, new Event('visibilitychange'));
+      expect(calledCommands()).toContain('check_android_local_network_access');
+    });
     expect(screen.getByText(/local network access needed/i)).toBeInTheDocument();
 
     granted = true;

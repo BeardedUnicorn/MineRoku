@@ -23,6 +23,7 @@ import BottomNavBar from './components/BottomNavBar';
 import DevicePanel, { useVisibleDevices } from './components/DevicePanel';
 import DeviceSwitcher from './components/DeviceSwitcher';
 import EmptyState from './components/EmptyState';
+import FavoritesRow from './components/FavoritesRow';
 import RemoteControl from './components/RemoteControl';
 import SettingsDialog from './components/SettingsDialog';
 import StatusDot from './components/StatusDot';
@@ -572,14 +573,18 @@ const App: React.FC = () => {
         flexGrow: 1,
         minHeight: 0,
         overflowY: 'auto',
-        p: { xs: 1.5, sm: 2 },
+        px: { xs: 1.5, sm: 2 },
       });
       return (
         <Box key={device.hardware_id} sx={{ ...enter, display: 'flex', flexDirection: 'column', flexGrow: 1, minHeight: 0 }}>
           {/* Hidden, not unmounted, on the Apps tab: keyboard shortcuts and the Android media
               notification keep working there. */}
-          <Box sx={pane(mobileView === 'remote')}>
+          <Box sx={{ ...pane(mobileView === 'remote'), py: { xs: 1.5, sm: 2 } }}>
             <RemoteControl device={device} />
+            {/* Below the remote, never above: the buttons stay where the thumb expects them. */}
+            <Box sx={{ maxWidth: { xs: 422, sm: 390 }, mx: 'auto', mt: 2 }}>
+              <FavoritesRow device={device} />
+            </Box>
           </Box>
           {appsVisited && <Box sx={pane(mobileView === 'apps')}>{apps}</Box>}
         </Box>
@@ -592,7 +597,7 @@ const App: React.FC = () => {
         <Box sx={{ width: 368, flexShrink: 0, overflowY: 'auto', px: 3, py: 3, boxSizing: 'border-box' }}>
           <RemoteControl device={device} />
         </Box>
-        <Box sx={{ flexGrow: 1, minWidth: 0, overflowY: 'auto', py: 3, pr: 3 }}>{apps}</Box>
+        <Box sx={{ flexGrow: 1, minWidth: 0, overflowY: 'auto', pb: 3, pr: 3 }}>{apps}</Box>
       </Box>
     );
   };

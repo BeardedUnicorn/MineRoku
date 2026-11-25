@@ -26,6 +26,7 @@ import { usePlatform } from '../hooks/usePlatform';
 import { useBackHandler } from '../hooks/useBackHandler';
 import { clearAllData, hideMediaNotification, restartApp } from '../services/rokuClient';
 import { resetUpdates } from '../services/updates';
+import { resetApps } from '../services/appsStore';
 import { radius, tokens } from '../tokens';
 import { getRemoteStyleTokens, remoteStyleLabels } from './remoteStyleTokens';
 import { PROJECT_URL } from './DevicePanel';
@@ -157,6 +158,7 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onClose }) => {
     keysToRemove.forEach((key) => localStorage.removeItem(key));
 
     iconCache.clear();
+    resetApps();
     useAppStore.persist.clearStorage();
     resetState();
     resetUpdates();
