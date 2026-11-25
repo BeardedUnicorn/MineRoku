@@ -196,14 +196,19 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onClose }) => {
 
             <Stack spacing={1}>
               <SectionTitle>Devices</SectionTitle>
-              <FormControlLabel
-                control={<Switch checked={preferLastUsed} onChange={(e) => setPreferLastUsed(e.target.checked)} />}
-                label="Prefer last-used device on startup"
-              />
-              <FormControlLabel
-                control={<Switch checked={showAllDevices} onChange={(e) => setShowAllDevices(e.target.checked)} />}
-                label="Show all discovered devices"
-              />
+              {/* In a Box: Stack would reset the label's own negative margin and indent the switch. */}
+              <Box>
+                <FormControlLabel
+                  control={<Switch checked={preferLastUsed} onChange={(e) => setPreferLastUsed(e.target.checked)} />}
+                  label="Prefer last-used device on startup"
+                />
+              </Box>
+              <Box>
+                <FormControlLabel
+                  control={<Switch checked={showAllDevices} onChange={(e) => setShowAllDevices(e.target.checked)} />}
+                  label="Show all discovered devices"
+                />
+              </Box>
               <Typography variant="caption" color="textSecondary">
                 When disabled, only connected devices are shown. Your selected device stays visible even if it goes
                 offline.
