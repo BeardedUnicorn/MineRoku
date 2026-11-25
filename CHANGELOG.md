@@ -6,7 +6,7 @@ heading into the new version's. Each section becomes that release's notes on
 GitHub, and the in-app update dialog shows the sections since the installed
 version (README's "Releasing").
 
-## Unreleased
+## 0.4.0 – 2026-11-25
 
 ### Changed
 - A new look: deep purple surfaces taken from the app icon, a lighter accent that is readable as text, a bundled typeface (Inter), rounder shapes and a visible keyboard focus ring. The remote keeps its layout, buttons and four styles; the Classic style is tinted to match.
