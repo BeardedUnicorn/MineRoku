@@ -1,7 +1,6 @@
 
 import React from 'react';
 import { BottomNavigation, BottomNavigationAction, Paper } from '@mui/material';
-import { alpha } from '@mui/material/styles';
 import { BOTTOM_NAV_HEIGHT } from '../layout';
 import { tokens } from '../tokens';
 import AppsIcon from '@mui/icons-material/Apps';
@@ -20,15 +19,10 @@ const BottomNavBar: React.FC<BottomNavBarProps> = ({ view, setView }) => {
     return (
         <Paper
             sx={{
-                position: 'fixed',
-                bottom: 0,
-                left: 0,
-                right: 0,
-                zIndex: 1000,
                 borderTop: '1px solid',
                 borderColor: 'divider',
-                backgroundColor: alpha(tokens.surfaceLowest, 0.92),
-                backdropFilter: 'blur(12px)',
+                backgroundColor: tokens.surfaceLowest,
+                borderRadius: 0,
                 paddingBottom: 'env(safe-area-inset-bottom)',
             }}
         >

@@ -1,36 +1,40 @@
-import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
-import Sidebar from './components/Sidebar';
-import UpdatePrompt from './components/UpdatePrompt';
-import RemoteControl from './components/RemoteControl';
 import {
-  Box,
-  Typography,
-  Paper,
-  CircularProgress,
   AppBar,
-  Toolbar,
-  IconButton,
-  useTheme,
-  useMediaQuery,
+  Box,
   Button,
+  CircularProgress,
+  IconButton,
+  Toolbar,
+  Tooltip,
+  Typography,
+  useMediaQuery,
+  useTheme,
 } from '@mui/material';
 import { alpha } from '@mui/material/styles';
-import { motion } from 'framer-motion';
-import { tokens } from './tokens';
 import TvIcon from '@mui/icons-material/Tv';
 import SearchOffIcon from '@mui/icons-material/SearchOff';
 import WifiOffIcon from '@mui/icons-material/WifiOff';
-import MenuIcon from '@mui/icons-material/Menu';
-import RefreshIcon from '@mui/icons-material/Refresh';
-import BottomNavBar from './components/BottomNavBar';
-import StatusDot from './components/StatusDot';
-import './App.css';
-import { useAppStore, type RokuDevice } from './store';
+import RadarIcon from '@mui/icons-material/Radar';
+import SettingsIcon from '@mui/icons-material/Settings';
 import { useShallow } from 'zustand/react/shallow';
+import BottomNavBar from './components/BottomNavBar';
+import DevicePanel, { useVisibleDevices } from './components/DevicePanel';
+import DeviceSwitcher from './components/DeviceSwitcher';
+import EmptyState from './components/EmptyState';
+import RemoteControl from './components/RemoteControl';
+import SettingsDialog from './components/SettingsDialog';
+import StatusDot from './components/StatusDot';
+import { useToast } from './components/ToastProvider';
+import UpdatePrompt from './components/UpdatePrompt';
 import { usePlatform } from './hooks/usePlatform';
+import { DEVICE_RAIL_WIDTH } from './layout';
 import { dismissSplash } from './splash';
+import { useAppStore, type RokuDevice } from './store';
+import { motion as motionTokens, tokens } from './tokens';
 import {
+  checkAndroidLocalNetworkAccess,
   checkDeviceConnectivity,
   discoverRokuDevices,
   ensureAndroidDiscoveryPermissions,
@@ -112,7 +116,10 @@ const App: React.FC = () => {
   const [isSearching, setIsSearching] = useState(true);
   const [networkAccess, setNetworkAccess] = useState<NetworkAccess>('unknown');
   const [isRequestingAccess, setIsRequestingAccess] = useState(false);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isDeviceSheetOpen, setIsDeviceSheetOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  // The apps list is loaded on first visit and then kept, so its scroll position survives.
+  const [appsVisited, setAppsVisited] = useState(false);
   const [mobileView, setMobileView] = useState<'remote' | 'apps'>('remote');
   const [isScanning, setIsScanning] = useState(false);
   const [scanStatus, setScanStatus] = useState('');
@@ -122,7 +129,8 @@ const App: React.FC = () => {
 
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
-  const prefersReducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
+  const showToast = useToast();
+  const visibleDevices = useVisibleDevices();
   const currentPlatform = usePlatform();
   const isAndroid = currentPlatform === 'android';
   const hasDevices = devices.length > 0;
@@ -163,9 +171,41 @@ const App: React.FC = () => {
     }
   }, [isAndroid, selectedHardwareId]);
 
+  // Granting access in system Settings does not come back through the prompt: look again
+  // whenever the app returns to the foreground, without prompting.
   useEffect(() => {
-    setIsSidebarOpen(!isMobile);
+    if (!isAndroid || networkAccess !== 'denied') {
+      return;
+    }
+
+    const recheck = () => {
+      if (document.visibilityState !== 'visible') {
+        return;
+      }
+      void checkAndroidLocalNetworkAccess()
+        .then((granted) => {
+          if (granted) {
+            setNetworkAccess('granted');
+          }
+        })
+        .catch(() => undefined);
+    };
+    document.addEventListener('visibilitychange', recheck);
+    return () => document.removeEventListener('visibilitychange', recheck);
+  }, [isAndroid, networkAccess]);
+
+  // The sheet only exists on the phone layout.
+  useEffect(() => {
+    if (!isMobile) {
+      setIsDeviceSheetOpen(false);
+    }
   }, [isMobile]);
+
+  useEffect(() => {
+    if (mobileView === 'apps') {
+      setAppsVisited(true);
+    }
+  }, [mobileView]);
 
   useEffect(() => {
     if (!selectedDevice || networkBlocked) {
@@ -236,14 +276,19 @@ const App: React.FC = () => {
     updateDeviceStatus,
   ]);
 
-  const handleToggleSidebar = useCallback(() => {
-    setIsSidebarOpen((v) => !v);
-  }, []);
-
-  const scanForDevices = useCallback(async () => {
+  // `announce` reports the outcome in a toast: for scans started from the device list, where the
+  // empty state's own status line is not on screen.
+  const scanForDevices = useCallback(async ({ announce = false }: { announce?: boolean } = {}) => {
     if (scanPromiseRef.current) {
       return scanPromiseRef.current;
     }
+
+    const report = (message: string, failed = false) => {
+      setScanStatus(message);
+      if (announce) {
+        showToast({ message, severity: failed ? 'error' : 'info' });
+      }
+    };
 
     const scanPromise = (async () => {
       setIsScanning(true);
@@ -256,8 +301,9 @@ const App: React.FC = () => {
           const hasPermissions = await ensureAndroidDiscoveryPermissions();
           if (!hasPermissions) {
             setScanFailed(true);
-            setScanStatus(
-              'Permission is required to find Roku devices on your network. Allow nearby devices (local network) access, then scan again.'
+            report(
+              'Permission is required to find Roku devices on your network. Allow nearby devices (local network) access, then scan again.',
+              true
             );
             return;
           }
@@ -288,8 +334,10 @@ const App: React.FC = () => {
         });
 
         const anyDevicesFound = foundDevices.length > 0;
-        setScanStatus(
-          anyDevicesFound ? `Found ${foundDevices.length} device(s)` : 'No devices found'
+        report(
+          anyDevicesFound
+            ? `Found ${foundDevices.length} ${foundDevices.length === 1 ? 'device' : 'devices'}`
+            : 'No devices found'
         );
 
         if (!state.selectedDevice && anyDevicesFound) {
@@ -298,7 +346,7 @@ const App: React.FC = () => {
       } catch (error) {
         console.error('Discovery error:', error);
         setScanFailed(true);
-        setScanStatus(`Scan failed: ${String(error)}`);
+        report(`Scan failed: ${String(error)}`, true);
       } finally {
         setIsScanning(false);
         setIsSearching(false);
@@ -311,7 +359,7 @@ const App: React.FC = () => {
         scanPromiseRef.current = null;
       }
     });
-  }, [addDiscoveredDevices, isAndroid, markDeviceDisconnected, setSelectedDevice]);
+  }, [addDiscoveredDevices, isAndroid, markDeviceDisconnected, setSelectedDevice, showToast]);
 
   useEffect(() => {
     let active = true;
@@ -357,32 +405,24 @@ const App: React.FC = () => {
     };
   }, [currentPlatform, isAndroid, scanForDevices, upsertDevice, setSelectedDevice]);
 
-  const contentVariants = useMemo(
-    () =>
-      prefersReducedMotion
-        ? {
-            hidden: { opacity: 1, y: 0 },
-            visible: { opacity: 1, y: 0 },
-            exit: { opacity: 1, y: 0 },
-          }
-        : {
-            hidden: { opacity: 0, y: 20 },
-            visible: { opacity: 1, y: 0, transition: { duration: 0.4 } },
-            exit: { opacity: 0, y: -20, transition: { duration: 0.3 } },
-          },
-    [prefersReducedMotion]
+  const openAppSettings = useCallback(() => {
+    void openAndroidAppSettings().catch((error) => {
+      console.error('Failed to open Android app settings:', error);
+    });
+  }, []);
+  const scanFromPanel = useCallback(() => void scanForDevices({ announce: true }), [scanForDevices]);
+  const closeDeviceSheet = useCallback(() => setIsDeviceSheetOpen(false), []);
+  const closeSettings = useCallback(() => setSettingsOpen(false), []);
+
+  const loadingFallback = (
+    <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 280 }}>
+      <CircularProgress size={26} />
+    </Box>
   );
 
-  const appLauncherFallback = useMemo(
-    () => (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 280 }}>
-        <CircularProgress size={26} />
-      </Box>
-    ),
-    []
-  );
+  const showRemote = Boolean(selectedDevice) && !networkBlocked;
 
-  const mainContent = useMemo(() => {
+  const renderStatus = () => {
     if (selectedDevice && networkBlocked) {
       if (networkAccess === 'unknown') {
         return (
@@ -400,109 +440,42 @@ const App: React.FC = () => {
       }
 
       return (
-        <Paper
-          sx={{
-            p: 4,
-            textAlign: 'center',
-            backgroundColor: 'background.paper',
-            borderRadius: 4,
-            maxWidth: 450,
-            mx: 'auto',
-          }}
-        >
-          <WifiOffIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
-          <Typography variant="h6" component="h2">
-            Local network access needed
-          </Typography>
-          <Typography variant="body1" color="textSecondary" sx={{ mt: 1 }}>
-            Roku Remote controls your Roku over Wi-Fi. Allow access to nearby devices so it can
-            reach {selectedDevice.name}.
-          </Typography>
-          <Button
-            variant="contained"
-            sx={{ mt: 2 }}
-            disabled={isRequestingAccess}
-            onClick={() => void requestNetworkAccess()}
-          >
-            Allow access
-          </Button>
-          <Button
-            variant="outlined"
-            sx={{ mt: 1.5, ml: 1 }}
-            onClick={() => {
-              void openAndroidAppSettings().catch((error) => {
-                console.error('Failed to open Android app settings:', error);
-              });
-            }}
-          >
-            Open Settings
-          </Button>
-        </Paper>
-      );
-    }
-
-    if (selectedDevice) {
-      return (
-        <motion.div
-          key={selectedDevice.hardware_id}
-          initial="hidden"
-          animate="visible"
-          exit="exit"
-          variants={contentVariants}
-          style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}
-        >
-          {isMobile ? (
-            <Box sx={{ flexGrow: 1, overflowY: 'auto', p: { xs: 1.25, sm: 1.5 } }}>
-              {mobileView === 'remote' && <RemoteControl device={selectedDevice} />}
-              {mobileView === 'apps' && (
-                <Suspense fallback={appLauncherFallback}>
-                  <LazyAppLauncher device={selectedDevice} />
-                </Suspense>
-              )}
-            </Box>
-          ) : (
-            <Box sx={{ display: 'flex', flexDirection: 'row', gap: 4, flex: 1, overflow: 'hidden' }}>
-              <Box
-                sx={{
-                  width: 320,
-                  flexShrink: 0,
-                  mx: 'auto',
-                  display: 'flex',
-                  justifyContent: 'center',
-                  alignItems: 'flex-start',
-                }}
+        <EmptyState
+          icon={<WifiOffIcon />}
+          title="Local network access needed"
+          description={
+            <>
+              Roku Remote controls your Roku over Wi-Fi. Allow access to nearby devices so it can
+              reach {selectedDevice.name}.
+            </>
+          }
+          actions={
+            <>
+              <Button
+                variant="contained"
+                disabled={isRequestingAccess}
+                onClick={() => void requestNetworkAccess()}
               >
-                <RemoteControl device={selectedDevice} />
-              </Box>
-              <Box sx={{ flexGrow: 1, minWidth: 0, overflowY: 'auto', pr: 2 }}>
-                <Suspense fallback={appLauncherFallback}>
-                  <LazyAppLauncher device={selectedDevice} />
-                </Suspense>
-              </Box>
-            </Box>
-          )}
-        </motion.div>
+                Allow access
+              </Button>
+              <Button variant="outlined" onClick={openAppSettings}>
+                Open Settings
+              </Button>
+            </>
+          }
+        />
       );
     }
 
-    const hasAnyDevices = hasDevices;
-
-    if (isSearching && !hasAnyDevices) {
+    if (isSearching && !hasDevices) {
       return (
         <Box
-          sx={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            height: '100%',
-            gap: 2,
-          }}
+          sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}
           role="status"
           aria-live="polite"
         >
           <CircularProgress />
-          <Typography variant="h6" color="textSecondary">
+          <Typography variant="h6" component="p" color="textSecondary">
             Searching for Roku devices…
           </Typography>
           {scanStatus && (
@@ -514,151 +487,191 @@ const App: React.FC = () => {
       );
     }
 
-    if (!hasAnyDevices) {
+    const scanButton = (label: string, variant: 'contained' | 'text' = 'contained') => (
+      <Button
+        variant={variant}
+        startIcon={isScanning ? <CircularProgress size={16} color="inherit" /> : <RadarIcon />}
+        onClick={() => void scanForDevices()}
+        disabled={isScanning}
+      >
+        {isScanning ? 'Scanning…' : label}
+      </Button>
+    );
+
+    if (!hasDevices) {
       const discoveryPermissionBlocked =
         isAndroid && scanFailed && scanStatus.toLowerCase().includes('permission');
       // Android never scans on its own, so the first visit is an invitation, not a failure.
       const neverScanned = isAndroid && !hasScanned;
       return (
-        <Paper
-          sx={{
-            p: 4,
-            textAlign: 'center',
-            backgroundColor: 'background.paper',
-            borderRadius: 4,
-            maxWidth: 450,
-            mx: 'auto',
-          }}
-        >
-          <SearchOffIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
-          <Typography variant="h6" component="h2" color="textSecondary">
-            {neverScanned ? 'Find your Roku' : 'No Roku Devices Found'}
-          </Typography>
-          <Typography variant="body1" color="textSecondary" sx={{ mt: 1 }}>
-            {neverScanned
+        <EmptyState
+          icon={neverScanned ? <TvIcon /> : <SearchOffIcon />}
+          title={neverScanned ? 'Find your Roku' : 'No Roku Devices Found'}
+          description={
+            neverScanned
               ? 'Make sure your Roku is powered on and on the same Wi-Fi network as this device, then scan.'
-              : 'Please ensure your Roku is powered on and connected to the same WiFi network, then scan again.'}
-          </Typography>
-          {scanFailed && scanStatus && (
-            <Typography variant="body2" color="error" sx={{ mt: 1 }} role="alert">
-              {scanStatus}
-            </Typography>
-          )}
-          <Box sx={{ mt: 2, display: 'flex', flexWrap: 'wrap', gap: 1.5, justifyContent: 'center' }}>
+              : 'Please ensure your Roku is powered on and connected to the same WiFi network, then scan again.'
+          }
+          error={scanFailed && scanStatus ? scanStatus : undefined}
+          actions={
+            <>
+              {scanButton(neverScanned ? 'Scan for devices' : 'Scan again')}
+              {discoveryPermissionBlocked && (
+                <Button variant="outlined" onClick={openAppSettings}>
+                  Open Settings
+                </Button>
+              )}
+            </>
+          }
+        />
+      );
+    }
+
+    // Devices are known but none is selected: offer them right here, one tap each.
+    return (
+      <EmptyState
+        icon={<TvIcon />}
+        title="Choose a Roku"
+        description={visibleDevices.length ? undefined : 'No connected devices right now.'}
+        error={scanFailed && scanStatus ? scanStatus : undefined}
+        actions={scanButton('Scan again', 'text')}
+      >
+        <Box sx={{ mt: 2, display: 'flex', flexDirection: 'column', gap: 1 }}>
+          {visibleDevices.map((device) => (
             <Button
-              variant="contained"
-              startIcon={isScanning ? <CircularProgress size={16} color="inherit" /> : <RefreshIcon />}
-              onClick={() => void scanForDevices()}
-              disabled={isScanning}
+              key={device.hardware_id}
+              variant="outlined"
+              fullWidth
+              onClick={() => setSelectedDevice(device)}
+              startIcon={<StatusDot online={device.status === 'connected'} />}
+              sx={{ justifyContent: 'flex-start', minHeight: 48, gap: 0.5, overflowWrap: 'anywhere', textAlign: 'left' }}
             >
-              {isScanning ? 'Scanning…' : neverScanned ? 'Scan for devices' : 'Refresh'}
+              {device.name}
             </Button>
-            {discoveryPermissionBlocked && (
-              <Button
-                variant="outlined"
-                onClick={() => {
-                  void openAndroidAppSettings().catch((error) => {
-                    console.error('Failed to open Android app settings:', error);
-                  });
-                }}
-              >
-                Open Settings
-              </Button>
-            )}
+          ))}
+        </Box>
+      </EmptyState>
+    );
+  };
+
+  const renderRemote = (device: RokuDevice) => {
+    const apps = (
+      <Suspense fallback={loadingFallback}>
+        <LazyAppLauncher device={device} />
+      </Suspense>
+    );
+    // Fades in when the device changes. Keyed on the device, so both panes remount with it.
+    const enter = {
+      animation: `content-in ${motionTokens.enter} ${motionTokens.easing}`,
+      '@keyframes content-in': { from: { opacity: 0, transform: 'translateY(8px)' } },
+    };
+
+    if (isMobile) {
+      const pane = (visible: boolean) => ({
+        display: visible ? 'block' : 'none',
+        flexGrow: 1,
+        minHeight: 0,
+        overflowY: 'auto',
+        p: { xs: 1.5, sm: 2 },
+      });
+      return (
+        <Box key={device.hardware_id} sx={{ ...enter, display: 'flex', flexDirection: 'column', flexGrow: 1, minHeight: 0 }}>
+          {/* Hidden, not unmounted, on the Apps tab: keyboard shortcuts and the Android media
+              notification keep working there. */}
+          <Box sx={pane(mobileView === 'remote')}>
+            <RemoteControl device={device} />
           </Box>
-        </Paper>
+          {appsVisited && <Box sx={pane(mobileView === 'apps')}>{apps}</Box>}
+        </Box>
       );
     }
 
     return (
-      <Paper
-        sx={{
-          p: 4,
-          textAlign: 'center',
-          backgroundColor: 'background.paper',
-          borderRadius: 4,
-          maxWidth: 450,
-          mx: 'auto',
-        }}
-      >
-        <TvIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
-        <Typography variant="h6" color="textSecondary">
-          Select a device to begin
-        </Typography>
-      </Paper>
+      <Box key={device.hardware_id} sx={{ ...enter, display: 'flex', flexGrow: 1, minHeight: 0 }}>
+        {/* Scrolls on its own, so a short window never cuts the remote off. */}
+        <Box sx={{ width: 368, flexShrink: 0, overflowY: 'auto', px: 3, py: 3, boxSizing: 'border-box' }}>
+          <RemoteControl device={device} />
+        </Box>
+        <Box sx={{ flexGrow: 1, minWidth: 0, overflowY: 'auto', py: 3, pr: 3 }}>{apps}</Box>
+      </Box>
     );
-  }, [
-    selectedDevice,
-    contentVariants,
-    isMobile,
-    mobileView,
-    appLauncherFallback,
-    hasDevices,
-    networkBlocked,
-    networkAccess,
-    isRequestingAccess,
-    requestNetworkAccess,
-    isSearching,
-    scanStatus,
-    scanFailed,
-    hasScanned,
-    isAndroid,
-    isScanning,
-    scanForDevices,
-  ]);
+  };
+
+  const title = selectedDevice ? selectedDevice.name : 'Roku Remote';
+  const online = selectedDevice ? selectedDevice.status === 'connected' : null;
+  const devicePanel = (
+    <DevicePanel
+      onScan={scanFromPanel}
+      isScanning={isScanning}
+      onSelected={isMobile ? closeDeviceSheet : undefined}
+    />
+  );
 
   return (
-    <Box className="app-container">
-      <Box component="nav" sx={{ flexShrink: 0 }} aria-label="device navigation">
-        <Sidebar
-          isOpen={isSidebarOpen}
-          onToggle={handleToggleSidebar}
-          scanForDevices={scanForDevices}
-          isScanning={isScanning}
-        />
-      </Box>
+    <Box sx={{ display: 'flex', height: '100dvh', bgcolor: 'background.default', color: 'text.primary' }}>
+      {/* The device list is always on screen on desktop. On phones it is a sheet opened from
+          the app bar title. */}
+      {!isMobile && (
+        <Box
+          component="nav"
+          aria-label="device navigation"
+          sx={{
+            width: DEVICE_RAIL_WIDTH,
+            flexShrink: 0,
+            bgcolor: 'background.paper',
+            borderRight: '1px solid',
+            borderColor: 'divider',
+          }}
+        >
+          {devicePanel}
+        </Box>
+      )}
       <UpdatePrompt />
-      <Box sx={{ display: 'flex', flexDirection: 'column', flexGrow: 1, height: '100dvh', overflow: 'hidden' }}>
+      <SettingsDialog open={settingsOpen} onClose={closeSettings} />
+
+      <Box sx={{ display: 'flex', flexDirection: 'column', flexGrow: 1, minWidth: 0, height: '100dvh', overflow: 'hidden' }}>
         <AppBar
           position="static"
           color="transparent"
           elevation={0}
           sx={{
-            borderBottom: `1px solid ${theme.palette.divider}`,
-            display: 'flex',
-            alignItems: 'center',
-            flexDirection: 'row',
             flexShrink: 0,
+            borderBottom: '1px solid',
+            borderColor: 'divider',
             backgroundColor: { xs: alpha(tokens.surfaceLowest, 0.88), md: 'transparent' },
             backdropFilter: { xs: 'blur(10px)', md: 'none' },
           }}
         >
-          <Toolbar sx={{ minHeight: { xs: 58, sm: 62, md: 64 }, px: { xs: 1, sm: 2 }, width: '100%' }}>
-            {/* The device list is always visible on desktop, so there is nothing to toggle. */}
-            {isMobile && (
-              <IconButton
-                edge="start"
-                color="inherit"
-                aria-label="Open device list"
-                onClick={handleToggleSidebar}
-                sx={{ mr: { xs: 1, sm: 2 }, width: 48, height: 48 }}
-              >
-                <MenuIcon />
-              </IconButton>
-            )}
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexGrow: 1, minWidth: 0 }}>
-              <Typography
-                variant={isMobile ? 'subtitle1' : 'h6'}
-                component="h1"
-                noWrap
-                sx={{ color: 'primary.main', fontWeight: 'bold', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}
-              >
-                {selectedDevice ? selectedDevice.name : 'Roku Remote'}
-              </Typography>
-              {selectedDevice && (
-                <StatusDot online={selectedDevice.status === 'connected'} />
+          <Toolbar disableGutters sx={{ minHeight: { xs: 52, md: 60 }, pl: { xs: 0.5, md: 3 }, pr: { xs: 0.5, md: 1.5 }, gap: 1 }}>
+            <Box component="h1" sx={{ m: 0, display: 'flex', alignItems: 'center', gap: 1.25, flexGrow: 1, minWidth: 0 }}>
+              {isMobile ? (
+                <DeviceSwitcher
+                  title={title}
+                  online={online}
+                  open={isDeviceSheetOpen}
+                  onOpen={() => setIsDeviceSheetOpen(true)}
+                  onClose={closeDeviceSheet}
+                >
+                  {devicePanel}
+                </DeviceSwitcher>
+              ) : (
+                <>
+                  <Typography variant="h6" component="span" noWrap sx={{ minWidth: 0 }}>
+                    {title}
+                  </Typography>
+                  {online !== null && <StatusDot online={online} />}
+                </>
               )}
             </Box>
+            <Tooltip title="Settings">
+              <IconButton
+                aria-label="Settings"
+                onClick={() => setSettingsOpen(true)}
+                sx={{ width: 48, height: 48, color: 'text.secondary' }}
+              >
+                <SettingsIcon />
+              </IconButton>
+            </Tooltip>
           </Toolbar>
         </AppBar>
 
@@ -666,24 +679,36 @@ const App: React.FC = () => {
           component="main"
           id="main-content"
           tabIndex={-1}
-          className={`main-content ${isMobile && selectedDevice && !networkBlocked ? 'main-content-mobile' : ''}`}
+          sx={{
+            flexGrow: 1,
+            minHeight: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            '&:focus-visible': { outline: `2px solid ${tokens.primaryLight}`, outlineOffset: -2 },
+          }}
         >
-          <Box
-            sx={{
-              display: 'flex',
-              flexDirection: 'column',
-              justifyContent: 'center',
-              alignItems: 'center',
-              flexGrow: 1,
-              width: '100%',
-            }}
-          >
-            {mainContent}
-          </Box>
+          {showRemote && selectedDevice ? (
+            renderRemote(selectedDevice)
+          ) : (
+            <Box
+              sx={{
+                flexGrow: 1,
+                minHeight: 0,
+                overflowY: 'auto',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'center',
+                alignItems: 'center',
+                p: 2,
+              }}
+            >
+              {renderStatus()}
+            </Box>
+          )}
         </Box>
 
-        {isMobile && selectedDevice && !networkBlocked && (
-          <Box component="nav" aria-label="bottom navigation">
+        {isMobile && showRemote && (
+          <Box component="nav" aria-label="bottom navigation" sx={{ flexShrink: 0 }}>
             <BottomNavBar view={mobileView} setView={setMobileView} />
           </Box>
         )}

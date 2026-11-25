@@ -218,6 +218,15 @@ mod android {
         ensure_discovery_permissions().await
     }
 
+    /// The same answer without a prompt: for re-checking after the user returns from system
+    /// Settings.
+    pub(super) fn local_network_access_granted() -> Result<bool, String> {
+        if !call_bool(jni_str!("localNetworkPermissionRequired"))? {
+            return Ok(true);
+        }
+        discovery_permissions_granted()
+    }
+
     pub(super) async fn ensure_notification_permission() -> Result<bool, String> {
         ensure_permission(
             NOTIFICATION_PERMISSION_REQUEST_CODE,
@@ -584,6 +593,16 @@ async fn ensure_android_local_network_access() -> Result<bool, String> {
     Ok(true)
 }
 
+/// Whether local network access is granted right now. Never prompts.
+#[command]
+fn check_android_local_network_access() -> Result<bool, String> {
+    #[cfg(target_os = "android")]
+    return android::local_network_access_granted();
+
+    #[cfg(not(target_os = "android"))]
+    Ok(true)
+}
+
 #[command]
 async fn ensure_android_notification_permission() -> Result<bool, String> {
     #[cfg(target_os = "android")]
@@ -789,6 +808,7 @@ pub fn run() {
             restart_app,
             ensure_android_discovery_permissions,
             ensure_android_local_network_access,
+            check_android_local_network_access,
             ensure_android_notification_permission,
             haptic_tap,
             open_android_app_settings,

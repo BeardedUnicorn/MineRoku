@@ -1,15 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import userEvent from '@testing-library/user-event';
-import { cleanup, screen, waitFor, within } from '@testing-library/react';
-import Sidebar from './Sidebar';
+import { cleanup, screen, waitFor } from '@testing-library/react';
+import DevicePanel from './DevicePanel';
 import { renderWithTheme } from '../testUtils';
 import { useAppStore, RokuDevice } from '../store';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { invoke } from '@tauri-apps/api/core';
 import { iconCache } from '../iconCache';
-import { resetUpdates, useUpdates } from '../services/updates';
 
-describe('Sidebar', () => {
+describe('DevicePanel', () => {
   const device: RokuDevice = {
     name: 'Living Room',
     ip: '1.1.1.1',
@@ -33,7 +32,6 @@ describe('Sidebar', () => {
     vi.mocked(invoke).mockResolvedValue(undefined);
     iconCache.clear();
     localStorage.clear();
-    resetUpdates();
   });
 
   // Dialogs left open by one test would hide the rest of the page from the next.
@@ -41,9 +39,10 @@ describe('Sidebar', () => {
     cleanup();
   });
 
-  it('renders devices and handles selection and refresh', async () => {
+  it('renders devices and handles selection and scanning', async () => {
     const scanForDevices = vi.fn();
-    renderWithTheme(<Sidebar isOpen onToggle={() => {}} scanForDevices={scanForDevices} isScanning={false} />);
+    const onSelected = vi.fn();
+    renderWithTheme(<DevicePanel onScan={scanForDevices} isScanning={false} onSelected={onSelected} />);
 
     // Device is rendered
     const deviceItem = screen.getByText('Living Room');
@@ -52,21 +51,26 @@ describe('Sidebar', () => {
     // Select device
     await userEvent.click(deviceItem);
     expect(useAppStore.getState().selectedDevice).toEqual(device);
+    // A sheet showing the panel closes on this.
+    expect(onSelected).toHaveBeenCalledTimes(1);
 
-    // Refresh button - MUI wraps the button in a span that duplicates the label,
-    // so select the actual button element.
-    const refreshBtns = screen.getAllByLabelText(/refresh device list/i);
-    await userEvent.click(refreshBtns[refreshBtns.length - 1]);
-    expect(scanForDevices).toHaveBeenCalled();
+    await userEvent.click(screen.getByRole('button', { name: 'Scan for devices' }));
+    expect(scanForDevices).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows a scan in progress and blocks a second one', () => {
+    renderWithTheme(<DevicePanel onScan={vi.fn()} isScanning />);
+
+    expect(screen.getByRole('button', { name: 'Scan for devices' })).toBeDisabled();
+    expect(screen.getByRole('progressbar', { name: /scanning for devices/i })).toBeVisible();
   });
 
   it('opens the about link', async () => {
-    const scanForDevices = vi.fn();
-    renderWithTheme(<Sidebar isOpen onToggle={() => {}} scanForDevices={scanForDevices} isScanning={false} />);
+    renderWithTheme(<DevicePanel onScan={vi.fn()} isScanning={false} />);
 
     const [aboutBtn] = screen.getAllByLabelText(/about/i);
     await userEvent.click(aboutBtn);
-    expect(openUrl).toHaveBeenCalledWith('https://github.com/mherold1/roku-controller');
+    expect(openUrl).toHaveBeenCalledWith('https://github.com/BeardedUnicorn/MineRoku');
   });
 
   it('hides non-selected offline devices when show all discovered devices is disabled', () => {
@@ -93,25 +97,11 @@ describe('Sidebar', () => {
       remoteStyle: 'classic',
     });
 
-    renderWithTheme(<Sidebar isOpen onToggle={() => {}} scanForDevices={vi.fn()} isScanning={false} />);
+    renderWithTheme(<DevicePanel onScan={vi.fn()} isScanning={false} />);
 
     expect(screen.getAllByText('Connected TV').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Selected Offline').length).toBeGreaterThan(0);
     expect(screen.queryByText('Hidden Offline')).not.toBeInTheDocument();
-  });
-
-  it('updates remote style from settings', async () => {
-    const scanForDevices = vi.fn();
-    renderWithTheme(<Sidebar isOpen onToggle={() => {}} scanForDevices={scanForDevices} isScanning={false} />);
-
-    const [settingsBtn] = screen.getAllByLabelText(/settings/i);
-    await userEvent.click(settingsBtn);
-
-    const styleSelect = await screen.findByRole('combobox', { name: /remote style/i });
-    await userEvent.click(styleSelect);
-    await userEvent.click(await screen.findByRole('option', { name: /glass/i }));
-
-    expect(useAppStore.getState().remoteStyle).toBe('glass');
   });
 
   describe('forgetting a device', () => {
@@ -123,8 +113,8 @@ describe('Sidebar', () => {
       hardware_id: 'roku:bedroom',
     };
 
-    const renderSidebar = () =>
-      renderWithTheme(<Sidebar isOpen onToggle={() => {}} scanForDevices={vi.fn()} isScanning={false} />);
+    const renderPanel = () =>
+      renderWithTheme(<DevicePanel onScan={vi.fn()} isScanning={false} />);
 
     const openForgetDialog = async (name: string) => {
       const buttons = screen.getAllByRole('button', { name: `Forget ${name}` });
@@ -143,7 +133,7 @@ describe('Sidebar', () => {
     it('removes the device from the backend and the list after confirming', async () => {
       iconCache.set('1.1.1.1:8060:12', { data: 'a', timestamp: 1 });
       iconCache.set('2.2.2.2:8060:13', { data: 'b', timestamp: 1 });
-      renderSidebar();
+      renderPanel();
 
       await openForgetDialog('Living Room');
       await userEvent.click(screen.getByRole('button', { name: 'Forget' }));
@@ -161,7 +151,7 @@ describe('Sidebar', () => {
     });
 
     it('leaves the selection alone when another device is forgotten', async () => {
-      renderSidebar();
+      renderPanel();
 
       await openForgetDialog('Bedroom');
       await userEvent.click(screen.getByRole('button', { name: 'Forget' }));
@@ -174,7 +164,7 @@ describe('Sidebar', () => {
     });
 
     it('does nothing when cancelled', async () => {
-      renderSidebar();
+      renderPanel();
 
       await openForgetDialog('Living Room');
       await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
@@ -187,7 +177,7 @@ describe('Sidebar', () => {
       vi.mocked(invoke).mockImplementation((cmd: string) =>
         cmd === 'forget_device' ? Promise.reject('database is locked') : Promise.resolve(undefined)
       );
-      renderSidebar();
+      renderPanel();
 
       await openForgetDialog('Living Room');
       await userEvent.click(screen.getByRole('button', { name: 'Forget' }));
@@ -199,81 +189,11 @@ describe('Sidebar', () => {
 
     it('does not select the device when its forget button is pressed', async () => {
       useAppStore.setState({ selectedDevice: null });
-      renderSidebar();
+      renderPanel();
 
       await openForgetDialog('Bedroom');
 
       expect(useAppStore.getState().selectedDevice).toBeNull();
-    });
-  });
-
-  it('keeps saved data and reports the error when Delete All Data fails', async () => {
-    vi.mocked(invoke).mockImplementation((cmd: string) =>
-      cmd === 'clear_all_data' ? Promise.reject('disk full') : Promise.resolve(undefined)
-    );
-    renderWithTheme(<Sidebar isOpen onToggle={() => {}} scanForDevices={vi.fn()} isScanning={false} />);
-
-    const [settingsBtn] = screen.getAllByLabelText(/settings/i);
-    await userEvent.click(settingsBtn);
-    await userEvent.click(await screen.findByRole('button', { name: /delete all data/i }));
-    await userEvent.click(await screen.findByRole('button', { name: /delete all & restart/i }));
-
-    expect(await screen.findByText(/could not delete saved data: disk full/i)).toBeInTheDocument();
-    expect(useAppStore.getState().devices).toHaveLength(1);
-    expect(invoke).not.toHaveBeenCalledWith('restart_app');
-  });
-
-  describe('updates in settings', () => {
-    async function openSettings() {
-      renderWithTheme(<Sidebar isOpen onToggle={() => {}} scanForDevices={vi.fn()} isScanning={false} />);
-      const [settingsBtn] = screen.getAllByLabelText(/settings/i);
-      await userEvent.click(settingsBtn);
-      return screen.findByRole('dialog', { name: 'Settings' });
-    }
-
-    it('shows the version and checks for updates on request', async () => {
-      vi.mocked(invoke).mockImplementation((cmd: string) =>
-        Promise.resolve(cmd === 'check_for_update' ? null : undefined)
-      );
-      const dialog = await openSettings();
-
-      expect(await within(dialog).findByText('Version 0.1.0')).toBeInTheDocument();
-      await userEvent.click(within(dialog).getByRole('button', { name: 'Check for updates' }));
-
-      expect(invoke).toHaveBeenCalledWith('check_for_update');
-      expect(await within(dialog).findByText('Roku Remote is up to date.')).toBeInTheDocument();
-    });
-
-    it('offers an update a check found', async () => {
-      const update = { version: '0.2.0', currentVersion: '0.1.0', notes: null, changelog: null, date: null };
-      vi.mocked(invoke).mockImplementation((cmd: string) =>
-        Promise.resolve(cmd === 'check_for_update' ? update : undefined)
-      );
-      const dialog = await openSettings();
-      await userEvent.click(within(dialog).getByRole('button', { name: 'Check for updates' }));
-
-      expect(await within(dialog).findByText('Roku Remote 0.2.0 is available.')).toBeInTheDocument();
-      useUpdates.getState().later();
-      await userEvent.click(within(dialog).getByRole('button', { name: 'Update…' }));
-      expect(useUpdates.getState().update).toEqual({ status: 'available', update, open: true });
-    });
-
-    it('shows why a check failed', async () => {
-      vi.mocked(invoke).mockImplementation((cmd: string) =>
-        cmd === 'check_for_update' ? Promise.reject('offline') : Promise.resolve(undefined)
-      );
-      const dialog = await openSettings();
-      await userEvent.click(within(dialog).getByRole('button', { name: 'Check for updates' }));
-      expect(await within(dialog).findByText("Couldn't check for updates. Offline.")).toBeInTheDocument();
-    });
-
-    it('turns automatic checks off', async () => {
-      const dialog = await openSettings();
-      const toggle = within(dialog).getByRole('switch', { name: 'Check for updates automatically' });
-      expect(toggle).toBeChecked();
-      await userEvent.click(toggle);
-      expect(useUpdates.getState().autoCheck).toBe(false);
-      expect(localStorage.getItem('rokuUpdateAutoCheck')).toBe('false');
     });
   });
 });
