@@ -1,6 +1,6 @@
 [package]
 name = "roku-controller"
-version = "0.4.0"
+version = "0.3.1"
 description = "A Roku Remote"
 authors = ["mike herold"]
 edition = "2021"
