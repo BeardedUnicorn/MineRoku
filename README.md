@@ -24,27 +24,35 @@ Key workflows:
 
 ## Screenshots
 
-Composite screenshot showing remote controls, apps grid, and device list:
+Desktop: the device list, the remote and the apps grid side by side.
 
 <p align="center">
-  <img src="docs/screenshots/remote.png" alt="Remote, Apps, and Device Sidebar" width="100%" />
-  
+  <img src="docs/screenshots/desktop.png" alt="Desktop window with the device list, the remote and the apps grid" width="100%" />
 </p>
 
-Close-ups for quick scanning:
+Phone: the remote, the device sheet opened from the device name, and the apps grid.
 
 <p align="center">
-  <img src="docs/screenshots/apps.png" alt="Apps Grid (zoomed)" width="49%" />
-  <img src="docs/screenshots/devices.png" alt="Device Sidebar (zoomed)" width="49%" />
+  <img src="docs/screenshots/phone-remote.png" alt="Remote on a phone" width="32%" />
+  <img src="docs/screenshots/phone-devices.png" alt="Device sheet on a phone" width="32%" />
+  <img src="docs/screenshots/phone-apps.png" alt="Apps grid with favorites on a phone" width="32%" />
+</p>
+
+Settings, with the four remote styles:
+
+<p align="center">
+  <img src="docs/screenshots/settings.png" alt="Settings dialog with the remote style picker" width="100%" />
 </p>
 
 ## Demo
 
-Short GIF showing navigation and launching an app:
+Searching apps, launching a favorite and switching the remote style:
 
 <p align="center">
   <img src="docs/screenshots/demo.gif" alt="Roku Remote Demo" width="800" />
 </p>
+
+The screenshots use demo data: placeholder devices and app tiles, not real channel artwork.
 
 ## Features
 
